@@ -193,7 +193,7 @@ def _llm_score_batch(db, batch: list[dict], refs_by_id: dict[int, object]) -> li
     )
     try:
         # 单批 60s 超时：LLM 慢/不可用时快速降级，避免整个请求长时间挂起
-        raw = llm_service.chat(db, system, [{"role": "user", "content": user}], max_tokens=3000, timeout=60)
+        raw = llm_service.chat(db, system, [{"role": "user", "content": user}], max_tokens=3000, timeout=60, task="link")
     except Exception:
         return []
     data = _parse_json_array(raw)

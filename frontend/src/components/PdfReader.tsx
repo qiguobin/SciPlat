@@ -44,6 +44,8 @@ export default function PdfReader({ referenceId }: { referenceId: number }) {
   const [qaHistory, setQaHistory] = useState<{ id: number; role: string; content: string }[]>([])
   const [qaLoading, setQaLoading] = useState(false)
   const [aiError, setAiError] = useState('')
+  const [chatModel, setChatModel] = useState<string | undefined>()
+  const [modelOptions, setModelOptions] = useState<string[]>([])
   const chatEndRef = useRef<HTMLDivElement>(null)
   const bump = useAppStore((s) => s.bump)
 
@@ -67,6 +69,10 @@ export default function PdfReader({ referenceId }: { referenceId: number }) {
     api.get<{ id: number; role: string; content: string }[]>(`/references/${referenceId}/chat`)
       .then((r) => setQaHistory(r.data))
       .catch(() => setQaHistory([]))
+    // 可用模型列表（对话换模型）
+    api.get<{ model: string }[]>('/llm/models')
+      .then((r) => setModelOptions(r.data.map((m) => m.model)))
+      .catch(() => setModelOptions([]))
   }, [referenceId])
 
   // 新消息自动滚动到底部
@@ -180,7 +186,7 @@ export default function PdfReader({ referenceId }: { referenceId: number }) {
     setQaLoading(true)
     // 临时 id（负数）避免与历史冲突，刷新后由服务端真实 id 取代
     setQaHistory((h) => [...h, { id: -Date.now(), role: 'user', content: question }])
-    api.post(`/references/${referenceId}/chat`, { question })
+    api.post(`/references/${referenceId}/chat`, { question, model: chatModel || '' })
       .then((r) => setQaHistory((h) => [...h, { id: -Date.now() - 1, role: 'assistant', content: r.data.reply }]))
       .catch((e) => setAiError(e.response?.data?.detail ?? '问答失败'))
       .finally(() => setQaLoading(false))
@@ -223,6 +229,14 @@ export default function PdfReader({ referenceId }: { referenceId: number }) {
           </Popconfirm>
         </Space>
         <Space style={{ marginTop: 6, width: '100%' }}>
+          <Select
+            placeholder="模型"
+            allowClear
+            style={{ width: 170 }}
+            value={chatModel}
+            onChange={setChatModel}
+            options={modelOptions.map((m) => ({ value: m, label: m }))}
+          />
           <Input
             placeholder="如：本文的核心创新点是什么？"
             value={qaInput}

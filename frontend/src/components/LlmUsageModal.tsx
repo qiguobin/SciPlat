@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert, Button, Card, Col, Input, Modal, Row, Space, Statistic, Table, Tag, Typography, message,
 } from 'antd'
 import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
+import EChart from './EChart'
 
 interface UsageAgg {
   calls: number
@@ -14,11 +15,13 @@ interface UsageAgg {
   cost: number
   currency: string
 }
+interface TrendPoint { date: string; total_tokens: number; cost: number }
 interface UsageData {
   today: UsageAgg
   month: UsageAgg
   total: UsageAgg
   by_model: { model: string; calls: number; total_tokens: number; prompt_tokens: number; completion_tokens: number; cache_hit_tokens: number; cost: number }[]
+  trend: TrendPoint[]
 }
 interface Balance {
   is_available: boolean
@@ -84,6 +87,28 @@ export default function LlmUsageModal({ open, onClose, onOpenLlm }: {
   const total = usage?.total
   const bal = balance
 
+  // 近 30 天趋势图（tokens + 费用双轴）
+  const trendOption = useMemo(() => {
+    const trend = usage?.trend ?? []
+    return {
+      tooltip: { trigger: 'axis' as const },
+      legend: { bottom: 0, textStyle: { color: '#94a3b8', fontSize: 10 } },
+      grid: { left: 48, right: 48, top: 16, bottom: 34 },
+      xAxis: { type: 'category' as const, data: trend.map((t) => t.date.slice(5)),
+        axisLabel: { color: '#64748b', fontSize: 9, interval: 3 }, axisLine: { lineStyle: { color: '#1E293B' } } },
+      yAxis: [
+        { type: 'value' as const, name: 'tokens', splitLine: { lineStyle: { color: '#16233A' } }, axisLabel: { color: '#64748b', fontSize: 9 } },
+        { type: 'value' as const, name: '费用', splitLine: { show: false }, axisLabel: { color: '#64748b', fontSize: 9 } },
+      ],
+      series: [
+        { name: 'tokens', type: 'bar' as const, data: trend.map((t) => t.total_tokens),
+          itemStyle: { color: '#34D399', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 },
+        { name: '费用', type: 'line' as const, yAxisIndex: 1, data: trend.map((t) => Number(t.cost.toFixed(4))),
+          smooth: true, symbolSize: 3, lineStyle: { color: '#FBBF24', width: 2 }, itemStyle: { color: '#FBBF24' } },
+      ],
+    }
+  }, [usage])
+
   return (
     <Modal title={<span><ReloadOutlined style={{ marginRight: 8 }} />LLM 用量与余额</span>}
       open={open} onCancel={onClose} width={760}
@@ -133,6 +158,11 @@ export default function LlmUsageModal({ open, onClose, onOpenLlm }: {
           <Typography.Text type="secondary" style={{ fontSize: 11 }}>
             费用为按模型单价折算的估算值（输入/输出/缓存命中分价），可在「模型配置」中调整单价。
           </Typography.Text>
+
+          {/* 近 30 天趋势 */}
+          <Card size="small" title="近 30 天用量趋势">
+            <EChart option={trendOption} height={200} />
+          </Card>
 
           {/* 分模型明细 */}
           <Card size="small" title="分模型用量">

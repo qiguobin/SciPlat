@@ -111,7 +111,7 @@ def build_report_ai(db, period: str, today: date | None = None) -> dict:
         "语言精炼学术，条目如实引用数据，不要编造数据。"
     )
     try:
-        markdown = llm_service.chat(db, system, [{"role": "user", "content": context}], max_tokens=2000)
+        markdown = llm_service.chat(db, system, [{"role": "user", "content": context}], max_tokens=2000, task="report")
         return {**base, "markdown": markdown, "ai": True}
     except Exception:
         return {**base, "ai": False}

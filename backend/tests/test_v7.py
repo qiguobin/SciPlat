@@ -390,7 +390,8 @@ def test_health_and_system_events():
     assert r.status_code == 200
     h = r.json()
     assert h["status"] == "ok"
-    assert h["version"] == "0.4.0"
+    from app import config as _cfg
+    assert h["version"] == _cfg.APP_VERSION
     assert h["db_path"].endswith("sci.db")
     assert "data_dir" in h and "db_size" in h
     assert "llm_configured" in h and "python" in h and "uptime_seconds" in h
@@ -616,3 +617,69 @@ def test_llm_models_meta_endpoint():
     assert r.status_code == 200
     meta = next(m for m in client.get("/api/llm/models").json() if m["model"] == "deepseek-chat")
     assert meta["context_window"] == 65536 and meta["input_price_per_m"] == 1.5
+
+
+def test_model_route_resolution():
+    """多模型路由：显式 > 任务路由 > default > 配置模型。"""
+    from app.services import llm as llm_service
+
+    _setup_llm_cfg()
+    with SessionLocal() as db:
+        llm_service.save_model_route(db, {"summary": "deepseek-chat", "default": "deepseek-v4-flash"})
+        cfg = llm_service._get_cfg(db)
+        assert llm_service.resolve_model(db, cfg, task="summary") == "deepseek-chat"
+        assert llm_service.resolve_model(db, cfg, task="chat") == "deepseek-v4-flash"  # 无 chat 路由 → default
+        assert llm_service.resolve_model(db, cfg) == "deepseek-v4-flash"  # 无任务 → default
+        assert llm_service.resolve_model(db, cfg, task="link", explicit="gpt-4o-mini") == "gpt-4o-mini"
+
+    # 无路由时回退配置模型
+    with SessionLocal() as db:
+        db.query(models.Setting).filter_by(key="llm_model_route").delete()
+        db.commit()
+        cfg = llm_service._get_cfg(db)
+        assert llm_service.resolve_model(db, cfg, task="summary") == "deepseek-chat"
+
+
+def test_usage_trend():
+    """用量趋势：近 30 天按日聚合。"""
+    from datetime import datetime, timedelta
+
+    from app.services import llm as llm_service
+
+    with SessionLocal() as db:
+        now = datetime.now()
+        db.add(models.LlmUsageLog(provider="openai", model="deepseek-chat",
+                                  prompt_tokens=10, completion_tokens=5, total_tokens=15,
+                                  cache_hit_tokens=0, cost=0.0001, created_at=now))
+        db.add(models.LlmUsageLog(provider="openai", model="deepseek-chat",
+                                  prompt_tokens=20, completion_tokens=10, total_tokens=30,
+                                  cache_hit_tokens=0, cost=0.0002, created_at=now - timedelta(days=3)))
+        db.commit()
+        summary = llm_service.get_usage_summary(db)
+        assert len(summary["trend"]) == 30
+        assert summary["trend"][0]["date"] == (now - timedelta(days=29)).strftime("%Y-%m-%d")
+        today_point = next(t for t in summary["trend"] if t["date"] == now.strftime("%Y-%m-%d"))
+        assert today_point["total_tokens"] == 15
+        assert today_point["cost"] == 0.0001
+
+
+def test_balance_moonshot():
+    """月之暗面余额接口适配。"""
+    from unittest.mock import patch
+
+    from app.services import llm as llm_service
+
+    with SessionLocal() as db:
+        s = db.query(models.Setting).filter_by(key="llm_base_url").first()
+        if s:
+            s.value = "https://api.moonshot.cn/v1"
+        else:
+            db.add(models.Setting(key="llm_base_url", value="https://api.moonshot.cn/v1"))
+        db.commit()
+    fake = type("R", (), {"raise_for_status": lambda self: None, "json": lambda self: {
+        "data": {"available_balance": 88.88, "voucher_balance": 0, "cash_balance": 88.88},
+    }})()
+    with patch("app.services.llm.httpx.get", return_value=fake):
+        with SessionLocal() as db:
+            r = llm_service.fetch_balance(db)
+            assert r["is_available"] and r["total_balance"] == 88.88

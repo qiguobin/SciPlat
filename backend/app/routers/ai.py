@@ -20,9 +20,9 @@ def _require_llm(db: Session) -> None:
         raise HTTPException(400, "未配置 LLM。请在顶栏 ⚙️ 设置中配置 OpenAI 兼容 API 或 Ollama。")
 
 
-def _safe_chat(db: Session, system: str, messages: list[dict]) -> str:
+def _safe_chat(db: Session, system: str, messages: list[dict], task: str = "", model: str = "") -> str:
     try:
-        return llm_service.chat(db, system, messages)
+        return llm_service.chat(db, system, messages, task=task, model=model)
     except llm_service.LLMNotConfigured as e:
         raise HTTPException(400, str(e)) from e
     except llm_service.LLMError as e:
@@ -55,6 +55,7 @@ def get_llm_settings(db: Session = Depends(get_db)):
         "input_price_per_m": meta.input_price_per_m if meta else 0,
         "output_price_per_m": meta.output_price_per_m if meta else 0,
         "cache_price_per_m": meta.cache_price_per_m if meta else 0,
+        "model_route": llm_service.get_model_route(db),
     }
 
 
@@ -102,6 +103,12 @@ def update_llm_settings(body: dict, db: Session = Depends(get_db)):
                     except (ValueError, TypeError):
                         pass
             saved.append("model_meta")
+    # 任务→模型 路由表
+    if "model_route" in body and isinstance(body["model_route"], dict):
+        from ..services import llm as llm_service
+
+        llm_service.save_model_route(db, body["model_route"])
+        saved.append("model_route")
     db.commit()
     return {"ok": True, "saved": saved}
 
@@ -209,7 +216,7 @@ def llm_chat(body: dict, db: Session = Depends(get_db)):
     messages = body.get("messages", [])
     if not messages:
         raise HTTPException(400, "缺少消息")
-    return {"reply": _safe_chat(db, body.get("system", ""), messages)}
+    return {"reply": _safe_chat(db, body.get("system", ""), messages, task="chat")}
 
 
 @router.post("/llm/test")
@@ -236,7 +243,7 @@ def ai_summary(rid: int, db: Session = Depends(get_db)):
         text = ((rt.summary if rt else "") or ref.title)[:MAX_CONTEXT]
 
     system = "你是资深科研助手。基于给定论文内容，用中文输出结构化解读（Markdown）：## 核心贡献 / ## 方法 / ## 主要结果与结论 / ## 局限与不足 / ## 对我的启发。"
-    result = _safe_chat(db, system, [{"role": "user", "content": f"论文标题：{ref.title}\n\n论文内容：\n{text}"}])
+    result = _safe_chat(db, system, [{"role": "user", "content": f"论文标题：{ref.title}\n\n论文内容：\n{text}"}], task="summary")
     return {"summary": result}
 
 
@@ -250,7 +257,7 @@ def ai_ten_questions(rid: int, db: Session = Depends(get_db)):
     text = (rt.text if rt and rt.text else ((rt.summary if rt else "") or ref.title))[:MAX_CONTEXT]
 
     system = "你是科研导师。基于论文内容，生成「论文十问」：10 个精读问题（为何做/做了什么/怎么做/结果如何/有何局限/与我的研究有何关联等），每问留出待答空间。用 Markdown 编号输出。"
-    result = _safe_chat(db, system, [{"role": "user", "content": f"论文标题：{ref.title}\n\n论文内容：\n{text}"}])
+    result = _safe_chat(db, system, [{"role": "user", "content": f"论文标题：{ref.title}\n\n论文内容：\n{text}"}], task="summary")
     return {"questions": result}
 
 
@@ -296,7 +303,7 @@ def chat_reference(rid: int, body: dict, db: Session = Depends(get_db)):
         "请明确说明并给出合理的推断方向。回答使用中文，必要时保留英文术语。"
         f"\n\n{context}"
     )
-    reply = _safe_chat(db, system, messages)
+    reply = _safe_chat(db, system, messages, task="chat", model=str(body.get("model") or ""))
     db.add(models.ChatMessage(reference_id=rid, role="user", content=question[:8000]))
     db.add(models.ChatMessage(reference_id=rid, role="assistant", content=reply))
     db.commit()
@@ -335,7 +342,7 @@ def ai_review(body: dict, db: Session = Depends(get_db)):
     context = "\n\n".join(chunks)[:MAX_CONTEXT]
 
     system = "你是文献综述专家。基于给定文献列表，生成结构化中文综述（Markdown）：## 引言（研究背景与主题范围）/ ## 主题分组（按方法或主题分 2-4 组，每组对比文献观点与差异）/ ## 关键发现与共识 / ## 争议与开放问题 / ## 结论与展望 / ## 参考文献（用 [n] 对应文献列表）。"
-    result = _safe_chat(db, system, [{"role": "user", "content": context}])
+    result = _safe_chat(db, system, [{"role": "user", "content": context}], task="summary")
     # 附上文献列表供引用核对
     ref_list = "\n".join(f"[{i + 1}] {r.title}（{r.year}）{('，' + r.venue) if r.venue else ''}" for i, r in enumerate(refs))
     return {"markdown": result + f"\n\n---\n\n## 文献列表\n{ref_list}"}
@@ -360,7 +367,7 @@ def ai_review_export(body: dict, db: Session = Depends(get_db)):
         chunks.append(f"[{len(refs)}] 标题：{r.title}\n作者：{'、'.join(r.authors[:3])}\n年份：{r.year}\n摘要：{abstract[:800]}")
     context = "\n\n".join(chunks)[:MAX_CONTEXT]
     system = "你是文献综述专家。基于文献列表生成结构化中文综述（Markdown），含引言/主题分组/关键发现/争议/结论/参考文献。"
-    result = _safe_chat(db, system, [{"role": "user", "content": context}])
+    result = _safe_chat(db, system, [{"role": "user", "content": context}], task="summary")
     ref_list = "\n".join(f"[{i + 1}] {r.title}（{r.year}）{('，' + r.venue) if r.venue else ''}" for i, r in enumerate(refs))
     content = f"# AI 文献综述\n\n{result}\n\n---\n\n## 文献列表\n{ref_list}\n"
     from urllib.parse import quote
@@ -382,7 +389,7 @@ def ai_submit_review(pid: int, db: Session = Depends(get_db)):
         f"关键词：{paper.keywords}\n摘要：{paper.abstract or '（未填写）'}\n\n章节进度：\n{sec_text or '（未设置章节）'}"
     )
     system = "你是期刊审稿专家（对标 Nature 审稿标准）。对给定论文进行投稿前审查，输出（Markdown）：## 摘要质量评估 / ## 结构完整度 / ## 方法严谨性提示 / ## 语言与表达建议 / ## 期刊匹配度与推荐 / ## 投稿前 Checklist（逐项 ✅/❌）。"
-    result = _safe_chat(db, system, [{"role": "user", "content": context}])
+    result = _safe_chat(db, system, [{"role": "user", "content": context}], task="review")
     return {"review": result}
 
 
@@ -411,7 +418,7 @@ def ai_polish(body: dict, db: Session = Depends(get_db)):
         f"你是学术写作助手。任务：{POLISH_ACTIONS[action]}。"
         "只输出处理后的结果文本，不要任何解释、前缀或引号。"
     )
-    result = _safe_chat(db, system, [{"role": "user", "content": text[:20000]}])
+    result = _safe_chat(db, system, [{"role": "user", "content": text[:20000]}], task="polish")
     return {"result": result, "action": action}
 
 
@@ -609,7 +616,7 @@ def ai_meeting_notes(mid: int, db: Session = Depends(get_db)):
         "如「这篇文献对当前项目有何启发」「文献方法与我们的工作有何异同」）/ "
         "## 待办事项提炼 / ## 下次组会建议。"
     )
-    result = _safe_chat(db, system, [{"role": "user", "content": context}])
+    result = _safe_chat(db, system, [{"role": "user", "content": context}], task="summary")
     m.qa_notes = result
     db.commit()
     return {"qa_notes": result}
@@ -637,7 +644,7 @@ def ai_meeting_summary(mid: int, db: Session = Depends(get_db)):
         "## 会议概况（时间/类型/参会人/议程）/ ## 讨论要点（逐条归纳）"
         "/ ## 结论与决议 / ## 待办事项（谁负责、何时完成）/ ## 风险与遗留问题。"
     )
-    result = _safe_chat(db, system, [{"role": "user", "content": context}])
+    result = _safe_chat(db, system, [{"role": "user", "content": context}], task="summary")
     m.summary = result
     db.commit()
     return {"summary": result}

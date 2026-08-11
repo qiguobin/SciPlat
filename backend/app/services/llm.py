@@ -46,6 +46,10 @@ MODEL_PRESETS: list[tuple] = [
     ("qwen2.5", 32_768, 0.0, 0.0, 0.0, "CNY"),  # Ollama 本地免费
 ]
 
+# 任务 → 模型 路由（空值 = 使用配置默认模型）；键：任务类型 + default
+ROUTE_KEYS = ["default", "chat", "summary", "review", "polish", "link", "metadata", "report"]
+DEFAULT_MODEL_ROUTE = {k: "" for k in ROUTE_KEYS}
+
 
 class LLMNotConfigured(Exception):
     pass
@@ -75,6 +79,50 @@ def is_configured(db) -> bool:
     if cfg["provider"] == "ollama":
         return True  # 本地 Ollama 视为已配置（连不上时调用报错）
     return bool(cfg["base_url"] and cfg["model"])
+
+
+def get_model_route(db) -> dict:
+    """读取任务→模型路由表（settings 存 JSON，合并默认键）。"""
+    import json
+
+    from .. import models
+
+    s = db.query(models.Setting).filter_by(key="llm_model_route").first()
+    route = dict(DEFAULT_MODEL_ROUTE)
+    if s and s.value:
+        try:
+            saved = json.loads(s.value)
+            if isinstance(saved, dict):
+                route.update({k: str(v) for k, v in saved.items() if k in ROUTE_KEYS})
+        except json.JSONDecodeError:
+            pass
+    return route
+
+
+def save_model_route(db, route: dict) -> None:
+    import json
+
+    from .. import models
+
+    cleaned = {k: str(route.get(k) or "").strip() for k in ROUTE_KEYS if k in route}
+    s = db.query(models.Setting).filter_by(key="llm_model_route").first()
+    if s:
+        s.value = json.dumps(cleaned, ensure_ascii=False)
+    else:
+        db.add(models.Setting(key="llm_model_route", value=json.dumps(cleaned, ensure_ascii=False)))
+    db.commit()
+
+
+def resolve_model(db, cfg: dict, task: str = "", explicit: str = "") -> str:
+    """解析实际调用模型：显式指定 > 任务路由 > default 路由 > 配置默认模型。"""
+    if explicit and explicit.strip():
+        return explicit.strip()
+    route = get_model_route(db)
+    for key in (task or "", "default"):
+        m = (route.get(key) or "").strip()
+        if m:
+            return m
+    return cfg["model"]
 
 
 def ensure_model_meta(db) -> None:
@@ -145,11 +193,20 @@ def _record_usage(db, cfg: dict, usage: dict) -> None:
             pass
 
 
-def chat(db, system: str, messages: list[dict], max_tokens: int = 4000, timeout: float | None = None) -> str:
-    """统一对话入口。messages: [{role, content}]，system 可选。timeout 覆盖默认值（秒）。"""
+def chat(db, system: str, messages: list[dict], max_tokens: int = 4000, timeout: float | None = None,
+         task: str = "", model: str = "") -> str:
+    """统一对话入口。messages: [{role, content}]，system 可选。
+
+    task：任务类型（chat/summary/review/polish/link/metadata/report），按路由表选模型；
+    model：显式指定模型（覆盖路由）；usage 按实际调用模型记录。
+    """
     cfg = _get_cfg(db)
     if not is_configured(db):
         raise LLMNotConfigured("未配置 LLM。请在顶栏 ⚙️ 设置中配置 OpenAI 兼容 API 或 Ollama。")
+    actual_model = resolve_model(db, cfg, task, model)
+    if not actual_model:
+        raise LLMNotConfigured("未配置默认模型。请在顶栏 ⚙️ 设置中填写模型名。")
+    cfg = {**cfg, "model": actual_model}
     payload_msgs = ([{"role": "system", "content": system}] if system else []) + messages
     conn_timeout = timeout if timeout is not None else DEFAULT_TIMEOUT
 
@@ -215,7 +272,7 @@ def test_connection(db) -> dict:
 
 
 def fetch_balance(db) -> dict:
-    """查询账户余额：DeepSeek 自动获取；Ollama/其他服务商给出说明。
+    """查询账户余额：DeepSeek / 月之暗面自动获取；Ollama/其他服务商给出说明。
 
     返回 {is_available, total_balance, currency, note}。
     """
@@ -223,32 +280,40 @@ def fetch_balance(db) -> dict:
     if cfg["provider"] == "ollama":
         return {"is_available": False, "total_balance": 0.0, "currency": "CNY", "note": "Ollama 为本地模型，无余额概念"}
     base = cfg["base_url"].rstrip("/")
-    if "deepseek.com" not in base:
-        return {"is_available": False, "total_balance": 0.0, "currency": "CNY",
-                "note": "该服务商暂不支持自动查询余额，可在设置中手动填写"}
-    api_base = base.replace("/chat/completions", "").replace("/v1", "")
-    try:
-        resp = httpx.get(
-            f"{api_base}/user/balance",
-            headers={"Authorization": f"Bearer {cfg['api_key']}"} if cfg["api_key"] else {},
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        infos = (resp.json().get("balance_infos") or [{}])
-        info = infos[0] if infos else {}
-        balance = float(info.get("total_balance") or 0.0)
-        return {"is_available": True, "total_balance": balance,
-                "currency": info.get("currency") or "CNY", "note": ""}
-    except Exception as e:  # noqa: BLE001
-        return {"is_available": False, "total_balance": 0.0, "currency": "CNY",
-                "note": f"余额查询失败：{e}"}
+    headers = {"Authorization": f"Bearer {cfg['api_key']}"} if cfg["api_key"] else {}
+
+    if "deepseek.com" in base:
+        api_base = base.replace("/chat/completions", "").replace("/v1", "")
+        try:
+            resp = httpx.get(f"{api_base}/user/balance", headers=headers, timeout=15.0)
+            resp.raise_for_status()
+            infos = (resp.json().get("balance_infos") or [{}])
+            info = infos[0] if infos else {}
+            return {"is_available": True, "total_balance": float(info.get("total_balance") or 0.0),
+                    "currency": info.get("currency") or "CNY", "note": ""}
+        except Exception as e:  # noqa: BLE001
+            return {"is_available": False, "total_balance": 0.0, "currency": "CNY",
+                    "note": f"余额查询失败：{e}"}
+
+    if "moonshot.cn" in base:
+        api_base = base.replace("/chat/completions", "").replace("/v1", "")
+        try:
+            resp = httpx.get(f"{api_base}/v1/users/me/balance", headers=headers, timeout=15.0)
+            resp.raise_for_status()
+            data = resp.json().get("data") or {}
+            balance = float(data.get("available_balance") or 0.0)
+            return {"is_available": True, "total_balance": balance, "currency": "CNY", "note": ""}
+        except Exception as e:  # noqa: BLE001
+            return {"is_available": False, "total_balance": 0.0, "currency": "CNY",
+                    "note": f"余额查询失败：{e}"}
+
+    return {"is_available": False, "total_balance": 0.0, "currency": "CNY",
+            "note": "该服务商暂不支持自动查询余额，可在设置中手动填写"}
 
 
 def get_usage_summary(db) -> dict:
-    """用量聚合：今日/本月/累计 tokens 与费用 + 分模型明细。"""
-    from datetime import datetime
-
-    from sqlalchemy import func
+    """用量聚合：今日/本月/累计 tokens 与费用 + 分模型明细 + 近 30 天趋势。"""
+    from datetime import datetime, timedelta
 
     from .. import models
 
@@ -282,9 +347,23 @@ def get_usage_summary(db) -> dict:
         m["cache_hit_tokens"] += row.cache_hit_tokens
         m["cost"] = round(m["cost"] + row.cost, 4)
 
+    # 近 30 天每日趋势（tokens / 费用）
+    start30 = today_start - timedelta(days=29)
+    day_map: dict[str, dict] = {}
+    for row in db.query(models.LlmUsageLog).filter(models.LlmUsageLog.created_at >= start30).all():
+        key = row.created_at.strftime("%Y-%m-%d")
+        d = day_map.setdefault(key, {"date": key, "total_tokens": 0, "cost": 0.0})
+        d["total_tokens"] += row.total_tokens
+        d["cost"] = round(d["cost"] + row.cost, 4)
+    trend = []
+    for i in range(30):
+        key = (start30 + timedelta(days=i)).strftime("%Y-%m-%d")
+        trend.append(day_map.get(key, {"date": key, "total_tokens": 0, "cost": 0.0}))
+
     return {
         "today": _agg(today_start),
         "month": _agg(month_start),
         "total": _agg(datetime(2000, 1, 1)),
         "by_model": sorted(by_model.values(), key=lambda m: -m["total_tokens"]),
+        "trend": trend,
     }

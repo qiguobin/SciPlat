@@ -13,7 +13,20 @@ interface LlmConfig {
   input_price_per_m: number
   output_price_per_m: number
   cache_price_per_m: number
+  model_route: Record<string, string>
 }
+
+// 任务→模型 路由（按任务选模型，实现成本优化）
+const ROUTE_LABELS: [string, string][] = [
+  ['default', '默认（未指定任务时）'],
+  ['chat', '文献对话 / 通用问答'],
+  ['summary', '解读 / 十问 / 综述 / 纪要'],
+  ['review', '投稿审查'],
+  ['polish', '写作润色'],
+  ['link', 'AI 自动关联'],
+  ['metadata', '元数据补全'],
+  ['report', '周报 / 月报'],
+]
 
 /** LLM 设置：OpenAI 兼容 API + Ollama 双通道 */
 export default function LlmSettings({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -120,6 +133,18 @@ export default function LlmSettings({ open, onClose }: { open: boolean; onClose:
         <Typography.Text type="secondary" style={{ fontSize: 11 }}>
           单价用于折算费用（估算，可在「LLM 用量与余额」中查看）；Ollama 本地免费。
         </Typography.Text>
+        <Form.Item label="任务 → 模型 路由（成本优化：不同任务用不同模型，留空 = 默认模型）">
+          <Space direction="vertical" style={{ width: '100%' }} size={2}>
+            {ROUTE_LABELS.map(([key, label]) => (
+              <Space key={key} style={{ width: '100%' }}>
+                <Typography.Text style={{ width: 150, fontSize: 12, flexShrink: 0 }}>{label}</Typography.Text>
+                <Form.Item name={['model_route', key]} noStyle>
+                  <Input placeholder="模型名（留空用默认）" style={{ width: 220 }} />
+                </Form.Item>
+              </Space>
+            ))}
+          </Space>
+        </Form.Item>
       </Form>
     </Modal>
   )

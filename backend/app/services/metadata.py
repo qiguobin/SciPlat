@@ -96,7 +96,7 @@ def infer_metadata_llm(db, ref: models.Reference, text: str = "") -> dict:
     if text:
         excerpt = f"\n\n文献摘要/全文片段：\n{text[:MAX_TEXT_CTX]}"
     try:
-        raw = llm_service.chat(db, system, [{"role": "user", "content": known + excerpt}], max_tokens=2000)
+        raw = llm_service.chat(db, system, [{"role": "user", "content": known + excerpt}], max_tokens=2000, task="metadata")
     except Exception:
         return {}
     data = _parse_json_object(raw)

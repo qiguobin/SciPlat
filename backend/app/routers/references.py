@@ -189,6 +189,93 @@ def network(tag: Optional[str] = None, min_weight: int = 0, db: Session = Depend
     )
 
 
+@router.post("/fts-search")
+def fts_search(body: dict, db: Session = Depends(get_db)):
+    """FTS5 全文检索（trigram 支持中文）：返回带高亮片段的结果。"""
+    q = str(body.get("q") or "").strip()
+    limit = max(1, min(int(body.get("limit") or 20), 50))
+    if not q:
+        raise HTTPException(400, "请输入检索词")
+    from ..database import engine
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                __import__("sqlalchemy").text(
+                    "SELECT ref_id, title, snippet(refs_fts, 1, '«', '»', '…', 14) AS snip "
+                    "FROM refs_fts WHERE refs_fts MATCH :q ORDER BY rank LIMIT :lim"
+                ),
+                {"q": q, "lim": limit},
+            ).all()
+    except Exception as e:  # FTS 语法错误等
+        raise HTTPException(400, f"检索失败：{e}") from e
+    if not rows:
+        return {"items": [], "query": q}
+    ids = [r[0] for r in rows]
+    titles: dict[int, str] = {r.id: r.title for r in db.query(models.Reference).filter(models.Reference.id.in_(ids)).all()}
+    return {
+        "items": [{
+            "reference_id": r[0],
+            "title": titles.get(r[0], "") or r[1],
+            "snippet": r[2] or "",
+        } for r in rows],
+        "query": q,
+    }
+
+
+@router.post("/semantic-search")
+def semantic_search(body: dict, db: Session = Depends(get_db)):
+    """AI 语义搜索：LLM 把自然语言查询扩展为关键词集 → FTS5 检索（未配置 LLM 时直接原文检索）。"""
+    q = str(body.get("q") or "").strip()
+    limit = max(1, min(int(body.get("limit") or 20), 50))
+    if not q:
+        raise HTTPException(400, "请输入查询内容")
+    from ..services import llm as llm_service
+
+    keywords = q
+    expanded = False
+    if llm_service.is_configured(db):
+        try:
+            system = (
+                "你是文献检索助手。把用户的自然语言查询改写为 3-6 个检索关键词或短语（中文用中文，"
+                "保留英文术语），只输出关键词，用空格分隔，不要任何解释。"
+            )
+            reply = llm_service.chat(db, system, [{"role": "user", "content": q}],
+                                     max_tokens=100, task="chat", timeout=30)
+            cleaned = " ".join(reply.split())
+            if cleaned and len(cleaned) <= 200:
+                keywords = cleaned
+                expanded = True
+        except Exception:
+            pass
+    # FTS OR 查询：关键词空格分隔即 OR（trigram 子串匹配）
+    try:
+        from ..database import engine
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                __import__("sqlalchemy").text(
+                    "SELECT ref_id, title, snippet(refs_fts, 1, '«', '»', '…', 14) AS snip "
+                    "FROM refs_fts WHERE refs_fts MATCH :q ORDER BY rank LIMIT :lim"
+                ),
+                {"q": keywords, "lim": limit},
+            ).all()
+    except Exception as e:
+        raise HTTPException(400, f"检索失败：{e}") from e
+    ids = [r[0] for r in rows]
+    titles: dict[int, str] = {r.id: r.title for r in db.query(models.Reference).filter(models.Reference.id.in_(ids)).all()}
+    return {
+        "items": [{
+            "reference_id": r[0],
+            "title": titles.get(r[0], "") or r[1],
+            "snippet": r[2] or "",
+        } for r in rows],
+        "query": q,
+        "keywords": keywords,
+        "expanded": expanded,
+    }
+
+
 # ---------- AI 自动关联（本地 TF-IDF 预筛 + LLM 批量评分，整体覆盖） ----------
 @router.post("/ai-auto-link")
 def ai_auto_link(db: Session = Depends(get_db)):

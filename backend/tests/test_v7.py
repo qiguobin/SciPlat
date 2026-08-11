@@ -802,3 +802,57 @@ def test_webdav_settings_endpoints():
     # 未启用时上传被拒
     r = client.post("/api/backup/webdav/upload", json={})
     assert r.status_code == 400
+
+
+# ================ M3 系列：FTS5 / 语义搜索 ================
+
+def test_fts_search():
+    """FTS5：索引重建 + 中文检索 + 高亮片段。"""
+    from app.database import rebuild_fts
+
+    _ref("图神经网络分子性质预测研究")
+    _ref("量子化学计算方法综述")
+    _add_text(_ref("深度学习在工业质检中的应用")["id"], "我们提出基于深度学习的缺陷检测方法，效果显著。")
+    assert rebuild_fts() >= 3
+
+    r = client.post("/api/references/fts-search", json={"q": "分子性质"})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert len(items) >= 1
+    assert "图神经网络分子性质预测研究" in items[0]["title"]
+
+    # 正文检索（trigram）
+    r = client.post("/api/references/fts-search", json={"q": "缺陷检测"})
+    items = r.json()["items"]
+    assert len(items) >= 1
+    assert "工业质检" in items[0]["title"]
+
+    # 空查询
+    assert client.post("/api/references/fts-search", json={"q": ""}).status_code == 400
+
+
+def test_semantic_search():
+    """AI 语义搜索：LLM 扩展关键词后检索；未配置 LLM 直接原文检索。"""
+    from unittest.mock import patch
+
+    from app.database import rebuild_fts
+
+    _ref("图神经网络分子性质预测研究")
+    _ref("深度学习工业缺陷检测方法")
+    assert rebuild_fts() >= 2
+
+    # 未配置 LLM → 原文检索
+    r = client.post("/api/references/semantic-search", json={"q": "分子性质"})
+    assert r.status_code == 200
+    assert r.json()["expanded"] is False
+    assert len(r.json()["items"]) >= 1
+
+    # 配置 LLM → 关键词扩展
+    with patch("app.services.llm.is_configured", return_value=True), \
+         patch("app.services.llm.chat", return_value="分子性质 图神经网络 预测"):
+        r = client.post("/api/references/semantic-search", json={"q": "怎么用图神经网络预测分子性质"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["expanded"] is True
+    assert "图神经网络" in body["keywords"]
+    assert len(body["items"]) >= 1

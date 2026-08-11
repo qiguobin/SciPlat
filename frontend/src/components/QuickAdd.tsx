@@ -1,16 +1,61 @@
 import { useEffect, useState } from 'react'
 import { Button, Form, Input, Modal, Select, Tabs, message } from 'antd'
-import { ThunderboltOutlined } from '@ant-design/icons'
+import { AudioOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 import { useAppStore } from '../store'
 
-/** 全局快捷键 / 快速录入：待办 / 灵感 */
+/** 全局快捷键 / 快速录入：待办 / 灵感（支持语音） */
 export default function QuickAdd() {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState('todo')
   const [projects, setProjects] = useState<{ id: number; title: string }[]>([])
+  const [listening, setListening] = useState(false)
   const [form] = Form.useForm()
   const bump = useAppStore((s) => s.bump)
+
+  const speechSupported = typeof window !== 'undefined'
+    && !!((window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition
+      || (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition)
+
+  /** 语音识别（Web Speech API，Chrome/Edge 中文）→ 填入当前 Tab 内容 */
+  const startVoice = () => {
+    const SR = (window as unknown as { webkitSpeechRecognition?: new () => {
+      lang: string; interimResults: boolean
+      onresult: ((e: { results: { [k: number]: { [k: number]: { transcript: string } } } }) => void) | null
+      onerror: (() => void) | null
+      onend: (() => void) | null
+      start: () => void
+    }; SpeechRecognition?: new () => {
+      lang: string; interimResults: boolean
+      onresult: ((e: { results: { [k: number]: { [k: number]: { transcript: string } } } }) => void) | null
+      onerror: (() => void) | null
+      onend: (() => void) | null
+      start: () => void
+    } }).webkitSpeechRecognition || (window as unknown as { SpeechRecognition?: new () => {
+      lang: string; interimResults: boolean
+      onresult: ((e: { results: { [k: number]: { [k: number]: { transcript: string } } } }) => void) | null
+      onerror: (() => void) | null
+      onend: (() => void) | null
+      start: () => void
+    } }).SpeechRecognition
+    if (!SR) {
+      message.warning('当前浏览器不支持语音识别，请使用 Chrome / Edge')
+      return
+    }
+    const rec = new SR()
+    rec.lang = 'zh-CN'
+    rec.interimResults = false
+    rec.onresult = (e) => {
+      const text = e.results[0][0].transcript
+      if (tab === 'todo') form.setFieldsValue({ title: text })
+      else form.setFieldsValue({ content: text })
+      message.success('已识别，可直接保存')
+    }
+    rec.onerror = () => message.error('语音识别失败（请检查麦克风权限）')
+    rec.onend = () => setListening(false)
+    setListening(true)
+    rec.start()
+  }
 
   useEffect(() => {
     api.get<{ id: number; title: string }[]>('/projects').then((r) => setProjects(r.data)).catch(() => {})
@@ -50,7 +95,14 @@ export default function QuickAdd() {
 
   return (
     <Modal
-      title={<span><ThunderboltOutlined style={{ color: '#c8873a', marginRight: 8 }} />快速录入（按 / 随时唤起）</span>}
+      title={<span><ThunderboltOutlined style={{ color: '#c8873a', marginRight: 8 }} />快速录入（按 / 随时唤起）
+        {speechSupported && (
+          <Button size="small" icon={<AudioOutlined />} loading={listening} onClick={startVoice}
+            style={{ marginLeft: 12 }} title="语音识别（中文）">
+            {listening ? '聆听中…' : '语音'}
+          </Button>
+        )}
+      </span>}
       open={open}
       onOk={save}
       onCancel={() => setOpen(false)}

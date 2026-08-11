@@ -579,6 +579,8 @@ ${aiModal.content}`,
                   rowKey="id"
                   loading={loading}
                   dataSource={list}
+                  virtual
+                  scroll={{ x: 1400, y: 620 }}
                   rowSelection={{
                     selectedRowKeys: selectedRefs.map((r) => r.id),
                     onChange: (_keys, rows) => setSelectedRefs(rows),

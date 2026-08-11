@@ -111,6 +111,13 @@ def _migrate_api_key_encryption() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    # FTS 全文索引全量重建（幂等，保证存量文献入库）
+    try:
+        from .database import rebuild_fts
+
+        rebuild_fts()
+    except Exception:
+        pass
     _migrate_api_key_encryption()
     # 启动时自动备份（距上次 >7 天）
     try:

@@ -102,3 +102,42 @@ sci_plat/
 - **DOI 获取失败**：需要外网访问 CrossRef；离线时手动填写元数据即可
 - **重新构建前端**：删除 `frontend/dist` 目录后再次运行启动脚本
 - **备份**：整个 `data/` 目录即全部数据，复制即可迁移
+
+## 软件更新（自建更新源）
+
+应用内置自动更新：检测 → 发布说明 → 一键下载（SHA256 校验）→ 静默升级 → 自动重启。**更新源不限于 GitHub**——任何能通过 HTTP 访问 latest.json + 安装包的地址都行。
+
+### 协议（latest.json，与安装包同目录上传）
+```json
+{
+  "version": "0.5.0",
+  "url": "https://你的地址/SciPlatSetup-0.5.0.exe",
+  "sha256": "…",
+  "notes": "发布说明（Markdown）",
+  "mandatory": false
+}
+```
+
+### 发布流程（任选渠道）
+```bat
+scripts\build-release.bat                       :: 构建安装包
+scripts\gen_latest.py                           :: 生成 latest.json（默认 GitHub）
+scripts\gen_latest.py --url-prefix https://桶.端点/路径 --notes "说明" --mandatory
+scripts\publish-oss.bat                         :: 对象存储一键发布（改桶名/端点后使用）
+```
+上传 `SciPlatSetup-x.y.z.exe` + `latest.json` 到更新源根目录（两者同级）。
+
+### 客户端配置（一次配置，全局生效）
+应用 → 状态栏「检查更新」→ 软件更新弹窗底部「更新源设置」→ 填写：
+- 对象存储：`https://桶.端点/路径/latest.json`
+- 内网服务器：`http://192.168.x.x:8080/sciplat/latest.json`（内网所有客户端填同一地址即可全局更新）
+
+### 推荐形态
+| 形态 | 说明 |
+|---|---|
+| 公网对象存储（OSS/COS） | 静态托管 latest.json + 安装包，公网全局更新，HTTPS 默认 |
+| 内网/局域网服务器 | Nginx 或 `python -m http.server`，内网一次发布全体更新 |
+| 自建 VPS + Nginx | 完全自主可控，配 HTTPS 证书 |
+| GitHub Releases | 默认渠道，无需服务器 |
+
+> 安全：下载后强制 SHA256 校验，内网 HTTP 源同样防篡改；建议公网源使用 HTTPS。

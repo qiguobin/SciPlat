@@ -1,8 +1,8 @@
 {
   "version": "0.6.0",
-  "url": "https://github.com/qiguobin/SciPlat/releases/latest/download/SciPlatSetup-0.6.0.exe",
+  "url": "https://gitee.com/oldhenpussy/sciplat/releases/download/v0.6.0/SciPlatSetup-0.6.0.exe",
   "sha256": "4f869b0fa22af0787bb43428f07dbefe9652e25a31acf7e0e74f9f080d15fcd3",
-  "notes": "## v0.6.0 更新内容（P1：AI 成本 + 数据安全 + 体验）\n\n### 🤖 AI 成本与多服务商\n- 多模型路由：不同任务自动选模型（⚙️ 设置中配置），降本增效\n- 文献精读对话可切换模型\n- 用量趋势图（近 30 天 tokens/费用）+ 月之暗面余额适配\n\n### 🔐 数据安全与云备份\n- API Key 加密存储（Fernet 密钥文件）\n- 备份 SHA256 校验 + 密码加密（PBKDF2）\n- WebDAV 云备份：坚果云/Nextcloud 配置即用，一键上传/恢复\n\n### ⚡ 体验\n- FTS5 全文检索（中文支持、高亮片段）\n- AI 语义搜索（自然语言找文献）\n- 文献列表虚拟滚动（千级流畅）\n- 快速录入语音识别（Chrome/Edge）\n\n> 注意：v0.6.0 起 API Key 加密存储，升级后无需重新配置。",
+  "notes": "## v0.6.0 更新内容（P1）\n\n- 🤖 AI 成本：多模型路由 / 对话换模型 / 用量趋势图 / 月之暗面余额\n- 🔐 安全：API Key 加密 / 备份 SHA256 校验 + 密码加密\n- ☁️ WebDAV 云备份（坚果云/Nextcloud）\n- ⚡ FTS5 中文全文检索 / AI 语义搜索 / 虚拟滚动 / 语音录入",
   "mandatory": false,
   "published_at": ""
 }

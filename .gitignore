@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+backend/.pytest_cache/
+backend/build/
+backend/dist/
+
+# Node
+node_modules/
+frontend/dist/
+
+# 桌面端打包产物
+desktop/release/
+desktop/node_modules/
+
+# 运行时数据（数据库 + 上传文件）——含 LLM API Key，严禁提交
+data/
+
+# 工具/杂项
+.zcode/
+.impeccable-cli/
+*.log
+*.spec.bak
+
+# IDE
+.idea/
+.vscode/
+*.swp

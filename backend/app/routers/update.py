@@ -22,7 +22,18 @@ def update_check(db: Session = Depends(get_db)):
     source = _get_source(db)
     data, error = updater.fetch_latest(source)
     if data is None:
-        return {"has_update": False, "error": error, "source": source}
+        return {
+            "has_update": False,
+            "current_version": config.APP_VERSION,
+            "latest_version": "",
+            "download_url": "",
+            "sha256": "",
+            "notes": "",
+            "mandatory": False,
+            "published_at": "",
+            "error": error,
+            "source": source,
+        }
     latest = str(data.get("version", "")).strip()
     has_update = updater.compare_versions(config.APP_VERSION, latest) > 0
     return {

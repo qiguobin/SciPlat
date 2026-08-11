@@ -1,8 +1,8 @@
 {
   "version": "0.6.1",
-  "url": "https://github.com/qiguobin/SciPlat/releases/latest/download/SciPlatSetup-0.6.1.exe",
+  "url": "https://gitee.com/oldhenpussy/sciplat/releases/download/v0.6.1/SciPlatSetup-0.6.1.exe",
   "sha256": "2f36f9c6f62139b943677f3334f23b9463bca8df3592eac72b4be0905ac9110f",
-  "notes": "## v0.6.1 修复\n\n- 🔧 修复自动更新下载进度条一直为 0：pywebview 6.x 不再自动注入 window 属性到 js_api，进度回调失效——已手动绑定，下载进度实时显示\n- 💬 下载/安装阶段文案优化（约 38MB，进度可能缓慢更新）\n- ⚠️ 若升级后仍未自动重启，请手动下载安装包覆盖安装",
+  "notes": "## v0.6.1 修复\n\n- 🔧 修复自动更新下载进度条一直为 0（js_api window 手动绑定）\n- 💬 下载/安装阶段文案优化",
   "mandatory": false,
   "published_at": ""
 }

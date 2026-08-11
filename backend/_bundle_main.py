@@ -115,16 +115,27 @@ class UpdateApi:
             return {"ok": False, "error": f"下载失败：{e}"}
 
     def install(self, path: str) -> dict:
-        """启动静默安装器（延迟 2s 等旧进程完全退出）并立即退出当前应用。
+        """启动静默安装器并立即退出当前应用。
 
-        安装器同 AppId 覆盖升级、保留 data/；安装完成后 [Run] 自动拉起新版。
+        用 PowerShell 隐藏窗口延迟 5 秒：等待当前进程与 WebView2 子进程完全退出、
+        释放 SciPlat.exe 文件占用（PyInstaller onefile 运行时锁定 exe），
+        再启动安装器覆盖升级（同 AppId，保留 data/）。安装日志写入临时目录便于排查。
         """
         import subprocess
+        import tempfile
+        from pathlib import Path
 
-        cmd = f'ping -n 3 127.0.0.1 >nul & "{path}" /SILENT /SUPPRESSMSGBOXES /NORESTART /SP-'
+        log = Path(tempfile.gettempdir()) / "sciplat-update" / "install.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        # 单引号包裹路径（临时目录路径不含单引号）
+        ps = (
+            f"Start-Sleep -Seconds 5; "
+            f"Start-Process -FilePath '{path}' "
+            f"-ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/LOG={log}'"
+        )
         try:
             subprocess.Popen(
-                ["cmd", "/c", cmd],
+                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 close_fds=True,
             )

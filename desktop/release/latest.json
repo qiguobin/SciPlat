@@ -1,8 +1,8 @@
 {
-  "version": "0.5.0",
-  "url": "https://github.com/qiguobin/SciPlat/releases/latest/download/SciPlatSetup-0.5.0.exe",
-  "sha256": "99585dc5d2c8c45f7a6502e299a0b80d5052a85114d4009ecc0f65abc30ae121",
-  "notes": "## v0.5.0 更新内容\n\n- 🚀 新增自动更新：检测 → 发布说明 → 一键下载（SHA256 校验）→ 静默升级 → 自动重启\n- 🌐 更新源支持 Gitee / 对象存储（OSS/COS）/ 内网服务器\n- 📊 状态栏新增 LLM 监控：上下文窗口、余额、今日 tokens 与费用、子任务状态\n- 🔧 修复：快速继续卡片为空、期刊名溢出、AI 自动关联无法生成、浅色模式菜单不可见等",
+  "version": "0.5.1",
+  "url": "https://github.com/qiguobin/SciPlat/releases/latest/download/SciPlatSetup-0.5.1.exe",
+  "sha256": "9f03afcfeac92d1ac092d0d564fb293104b69c0c532add059040755af2c4d1ff",
+  "notes": "## v0.5.1 修复\n\n- 🔧 修复自动更新一键升级失败：静默安装前等待时间不足导致旧进程文件占用、升级未生效\n  - 改用隐藏窗口延迟 5 秒（不再弹出 ping 命令行窗口）\n  - 安装过程记录日志：%TEMP%\\sciplat-update\\install.log（排查用）\n- ⚠️ 若本次自动升级仍失败，可手动下载安装包覆盖安装（数据保留）",
   "mandatory": false,
   "published_at": ""
 }

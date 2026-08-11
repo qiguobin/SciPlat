@@ -1,8 +1,8 @@
 {
-  "version": "0.5.1",
-  "url": "https://github.com/qiguobin/SciPlat/releases/latest/download/SciPlatSetup-0.5.1.exe",
-  "sha256": "9f03afcfeac92d1ac092d0d564fb293104b69c0c532add059040755af2c4d1ff",
-  "notes": "## v0.5.1 修复\n\n- 🔧 修复自动更新一键升级失败：静默安装前等待时间不足导致旧进程文件占用、升级未生效\n  - 改用隐藏窗口延迟 5 秒（不再弹出 ping 命令行窗口）\n  - 安装过程记录日志：%TEMP%\\sciplat-update\\install.log（排查用）\n- ⚠️ 若本次自动升级仍失败，可手动下载安装包覆盖安装（数据保留）",
+  "version": "0.6.0",
+  "url": "https://github.com/qiguobin/SciPlat/releases/latest/download/SciPlatSetup-0.6.0.exe",
+  "sha256": "4f869b0fa22af0787bb43428f07dbefe9652e25a31acf7e0e74f9f080d15fcd3",
+  "notes": "## v0.6.0 更新内容（P1：AI 成本 + 数据安全 + 体验）\n\n### 🤖 AI 成本与多服务商\n- 多模型路由：不同任务自动选模型（⚙️ 设置中配置），降本增效\n- 文献精读对话可切换模型\n- 用量趋势图（近 30 天 tokens/费用）+ 月之暗面余额适配\n\n### 🔐 数据安全与云备份\n- API Key 加密存储（Fernet 密钥文件）\n- 备份 SHA256 校验 + 密码加密（PBKDF2）\n- WebDAV 云备份：坚果云/Nextcloud 配置即用，一键上传/恢复\n\n### ⚡ 体验\n- FTS5 全文检索（中文支持、高亮片段）\n- AI 语义搜索（自然语言找文献）\n- 文献列表虚拟滚动（千级流畅）\n- 快速录入语音识别（Chrome/Edge）\n\n> 注意：v0.6.0 起 API Key 加密存储，升级后无需重新配置。",
   "mandatory": false,
   "published_at": ""
 }

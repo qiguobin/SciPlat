@@ -79,6 +79,68 @@ def _wait_ready(timeout: float = 30.0) -> bool:
     return False
 
 
+class UpdateApi:
+    """pywebview js_api：前端一键升级能力（下载安装包 → SHA256 校验 → 静默安装）。"""
+
+    def download(self, url: str, sha256: str) -> dict:
+        """流式下载安装包到临时目录并校验 SHA256（进度经 window 回调前端）。"""
+        import hashlib
+        import tempfile
+        from pathlib import Path
+
+        import httpx
+
+        try:
+            d = Path(tempfile.gettempdir()) / "sciplat-update"
+            d.mkdir(parents=True, exist_ok=True)
+            target = d / f"SciPlatSetup-{int(time.time())}.exe"
+            h = hashlib.sha256()
+            with httpx.stream("GET", url, timeout=300, follow_redirects=True) as resp:
+                resp.raise_for_status()
+                total = int(resp.headers.get("content-length") or 0)
+                done = 0
+                with open(target, "wb") as f:
+                    for chunk in resp.iter_bytes(1 << 20):
+                        f.write(chunk)
+                        h.update(chunk)
+                        done += len(chunk)
+                        if total:
+                            self._progress(min(100, round(done * 100 / total)))
+            if sha256 and h.hexdigest().lower() != sha256.lower():
+                target.unlink(missing_ok=True)
+                return {"ok": False, "error": "SHA256 校验失败：文件可能被篡改或下载不完整，请重试"}
+            self._progress(100)
+            return {"ok": True, "path": str(target)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"下载失败：{e}"}
+
+    def install(self, path: str) -> dict:
+        """启动静默安装器（延迟 2s 等旧进程完全退出）并立即退出当前应用。
+
+        安装器同 AppId 覆盖升级、保留 data/；安装完成后 [Run] 自动拉起新版。
+        """
+        import subprocess
+
+        cmd = f'ping -n 3 127.0.0.1 >nul & "{path}" /SILENT /SUPPRESSMSGBOXES /NORESTART /SP-'
+        try:
+            subprocess.Popen(
+                ["cmd", "/c", cmd],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        # 立即退出：释放 PyInstaller onefile 对 exe 的占用，让安装器可以覆盖文件
+        os._exit(0)
+        return {"ok": True}
+
+    def _progress(self, pct: int) -> None:
+        try:
+            self.window.evaluate_js(f"window.__updateProgress && window.__updateProgress({pct})")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 if __name__ == "__main__":
     threading.Thread(target=_run_server, daemon=True).start()
     if not _wait_ready():
@@ -91,6 +153,7 @@ if __name__ == "__main__":
     ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
     if os.path.exists(ico):
         icon = ico
+    update_api = UpdateApi()
     try:
         webview.create_window(
             "SciPlat 博士生科研管理平台",
@@ -100,9 +163,10 @@ if __name__ == "__main__":
             min_size=(1024, 640),
             icon=icon,
             background_color="#0B1120",
+            js_api=update_api,
         )
     except TypeError:
-        # 旧版 pywebview 无 icon 参数时降级
+        # 旧版 pywebview 无 icon/js_api 参数时降级
         webview.create_window(
             "SciPlat 博士生科研管理平台",
             f"http://{SERVER}:{port}/",
@@ -110,6 +174,7 @@ if __name__ == "__main__":
             height=900,
             min_size=(1024, 640),
             background_color="#0B1120",
+            js_api=update_api,
         )
     webview.start()
     # 窗口关闭 → 主进程退出（daemon 服务线程随之结束）

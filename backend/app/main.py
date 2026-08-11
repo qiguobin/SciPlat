@@ -27,6 +27,7 @@ from .routers import (
     stats,
     todos,
     tracking,
+    update as update_router,
     v5,
     writing,
 )
@@ -121,6 +122,7 @@ for router in (
     notifications.router,
     tracking.router,
     ai_router.router,
+    update_router.router,
 ):
     app.include_router(router)
 

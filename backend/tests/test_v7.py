@@ -412,3 +412,59 @@ def test_health_and_system_events():
     assert client.post("/api/system-events/clear").status_code == 200
     assert client.get("/api/system-events").json() == []
     assert client.get("/api/health").json()["error_count"] == 0
+
+
+# ================ U 系列：自动更新 ================
+
+def test_compare_versions():
+    from app.services import updater
+
+    assert updater.compare_versions("0.4.0", "0.5.0") == 1
+    assert updater.compare_versions("0.4.0", "0.4.0") == 0
+    assert updater.compare_versions("0.5.0", "0.4.0") == -1
+    assert updater.compare_versions("0.4.0", "0.4.1") == 1
+    assert updater.compare_versions("0.9.9", "0.10.0") == 1
+    assert updater.compare_versions("abc", "0.1.0") == 1  # 非法分段按 0 处理
+
+
+def test_update_check_endpoint():
+    from unittest.mock import patch
+
+    from app.services import updater
+
+    # 有新版（强制）
+    with patch.object(updater, "fetch_latest", return_value=(
+        {"version": "9.9.9", "url": "https://x/Setup.exe", "sha256": "abc", "notes": "新功能", "mandatory": True},
+        "",
+    )):
+        r = client.get("/api/update/check")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["has_update"] is True
+    assert d["latest_version"] == "9.9.9"
+    assert d["mandatory"] is True
+    assert d["notes"] == "新功能"
+    assert d["download_url"] == "https://x/Setup.exe"
+
+    # 相同版本 → 无更新
+    with patch.object(updater, "fetch_latest", return_value=({"version": "0.4.0", "url": ""}, "")):
+        assert client.get("/api/update/check").json()["has_update"] is False
+
+    # 网络失败 → error 透出
+    with patch.object(updater, "fetch_latest", return_value=(None, "更新源不可达：timeout")):
+        d = client.get("/api/update/check").json()
+        assert d["has_update"] is False
+        assert "更新源不可达" in d["error"]
+
+
+def test_update_settings_source():
+    # 默认源
+    assert "github.com" in client.get("/api/settings/update").json()["source_url"]
+    # 保存自定义源
+    r = client.put("/api/settings/update", json={"source_url": "http://127.0.0.1:9999/latest.json"})
+    assert r.status_code == 200
+    assert r.json()["source_url"] == "http://127.0.0.1:9999/latest.json"
+    assert client.get("/api/settings/update").json()["source_url"] == "http://127.0.0.1:9999/latest.json"
+    # 恢复默认
+    client.put("/api/settings/update", json={"source_url": ""})
+    assert "github.com" in client.get("/api/settings/update").json()["source_url"]

@@ -3,7 +3,7 @@ import {
   Button, Empty, List, Modal, Popover, Space, Tag, Tooltip, Typography, message,
 } from 'antd'
 import {
-  AlertOutlined, CheckCircleOutlined, CloseCircleOutlined, DatabaseOutlined, DeleteOutlined, RobotOutlined,
+  AlertOutlined, CheckCircleOutlined, CloseCircleOutlined, DatabaseOutlined, DeleteOutlined, ReloadOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import { api } from '../api/client'
 
@@ -39,12 +39,14 @@ const fmtUptime = (s: number) => {
 }
 
 /** 底部状态栏：服务/数据库/版本/LLM/错误计数（10s 轮询 /health） */
-export default function StatusBar({ onOpenData, onOpenLlm }: {
+export default function StatusBar({ onOpenData, onOpenLlm, onOpenUpdate }: {
   onOpenData?: () => void
   onOpenLlm?: () => void
+  onOpenUpdate?: () => void
 }) {
   const [health, setHealth] = useState<Health | null>(null)
   const [online, setOnline] = useState(true)
+  const [hasUpdate, setHasUpdate] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
   const [events, setEvents] = useState<SysEvent[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
@@ -57,6 +59,18 @@ export default function StatusBar({ onOpenData, onOpenLlm }: {
   useEffect(() => {
     load()
     const t = setInterval(load, 10000)
+    return () => clearInterval(t)
+  }, [])
+
+  // 更新可用性：启动时 + 每 6 小时静默检测一次（🆕 徽标）
+  useEffect(() => {
+    const checkUpdate = () => {
+      api.get<{ has_update: boolean }>('/update/check')
+        .then((r) => setHasUpdate(Boolean(r.data.has_update)))
+        .catch(() => { /* 网络不可达时静默 */ })
+    }
+    checkUpdate()
+    const t = setInterval(checkUpdate, 6 * 3600 * 1000)
     return () => clearInterval(t)
   }, [])
 
@@ -102,6 +116,13 @@ export default function StatusBar({ onOpenData, onOpenLlm }: {
             📦 v{health?.version ?? '—'}
             <span className="statusbar-dim"> · Python {health?.python ?? '—'}</span>
           </span>
+
+          <Tooltip title="检查更新">
+            <span className="statusbar-item statusbar-click" onClick={onOpenUpdate}>
+              <ReloadOutlined />
+              {hasUpdate ? <span className="statusbar-error">🆕 有新版本</span> : '检查更新'}
+            </span>
+          </Tooltip>
 
           <Tooltip title={health?.llm_configured ? '已配置 LLM' : '未配置 LLM，点击打开 AI 设置'}>
             <span className="statusbar-item statusbar-click" onClick={onOpenLlm}>

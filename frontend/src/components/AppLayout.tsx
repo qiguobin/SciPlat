@@ -19,11 +19,13 @@ import {
   TrophyOutlined,
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { api } from '../api/client'
 import QuickAdd from './QuickAdd'
 import DataManager from './DataManager'
 import NotificationCenter from './NotificationCenter'
 import LlmSettings from './LlmSettings'
 import StatusBar from './StatusBar'
+import UpdateChecker from './UpdateChecker'
 import { useAppStore } from '../store'
 
 const MENU_GROUPS = [
@@ -110,6 +112,7 @@ export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false)
   const [dataOpen, setDataOpen] = useState(false)
   const [llmOpen, setLlmOpen] = useState(false)
+  const [updateOpen, setUpdateOpen] = useState(false)
   const theme = useAppStore((s) => s.theme)
   const toggleTheme = useAppStore((s) => s.toggleTheme)
   const root = '/' + (loc.pathname.split('/')[1] || '')
@@ -133,6 +136,19 @@ export default function AppLayout() {
       window.removeEventListener('mousemove', onMove)
       if (raf) window.cancelAnimationFrame(raf)
     }
+  }, [])
+
+  // 启动自动检测更新：发现新版且当日未提示过 → 自动弹出（强制更新必弹）
+  useEffect(() => {
+    const KEY = 'sciplat-update-notified'
+    api.get<{ has_update: boolean; mandatory: boolean }>('/update/check')
+      .then((r) => {
+        if (!r.data.has_update) return
+        if (!r.data.mandatory && localStorage.getItem(KEY) === new Date().toDateString()) return
+        if (!r.data.mandatory) localStorage.setItem(KEY, new Date().toDateString())
+        setUpdateOpen(true)
+      })
+      .catch(() => { /* 网络不可达静默 */ })
   }, [])
 
   return (
@@ -216,13 +232,18 @@ export default function AppLayout() {
             </div>
           </div>
         </Layout.Content>
-        {/* 底部状态栏：数据库 / 版本 / LLM / 错误监控 */}
-        <StatusBar onOpenData={() => setDataOpen(true)} onOpenLlm={() => setLlmOpen(true)} />
+        {/* 底部状态栏：数据库 / 版本 / LLM / 错误监控 / 检查更新 */}
+        <StatusBar
+          onOpenData={() => setDataOpen(true)}
+          onOpenLlm={() => setLlmOpen(true)}
+          onOpenUpdate={() => setUpdateOpen(true)}
+        />
       </Layout>
 
       <QuickAdd />
       <LlmSettings open={llmOpen} onClose={() => setLlmOpen(false)} />
       <DataManager open={dataOpen} onClose={() => setDataOpen(false)} />
+      <UpdateChecker open={updateOpen} onClose={() => setUpdateOpen(false)} />
     </Layout>
   )
 }

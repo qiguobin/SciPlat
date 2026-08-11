@@ -9,6 +9,10 @@ interface LlmConfig {
   api_key: string
   model: string
   ollama_url: string
+  context_window: number
+  input_price_per_m: number
+  output_price_per_m: number
+  cache_price_per_m: number
 }
 
 /** LLM 设置：OpenAI 兼容 API + Ollama 双通道 */
@@ -97,6 +101,25 @@ export default function LlmSettings({ open, onClose }: { open: boolean; onClose:
         {config && config.api_key && provider === 'openai' && (
           <Alert type="info" showIcon message="已保存 API Key，可重新输入覆盖。" style={{ marginTop: 4 }} />
         )}
+        <Form.Item label="模型参数（状态栏用量/费用估算用，可留空用预设）">
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item name="context_window" noStyle>
+              <Input type="number" placeholder="上下文窗口(如 128000)" style={{ width: '40%' }} />
+            </Form.Item>
+            <Form.Item name="input_price_per_m" noStyle>
+              <Input type="number" step="0.01" placeholder="输入价/百万tok" style={{ width: '20%' }} />
+            </Form.Item>
+            <Form.Item name="output_price_per_m" noStyle>
+              <Input type="number" step="0.01" placeholder="输出价/百万tok" style={{ width: '20%' }} />
+            </Form.Item>
+            <Form.Item name="cache_price_per_m" noStyle>
+              <Input type="number" step="0.01" placeholder="缓存价/百万tok" style={{ width: '20%' }} />
+            </Form.Item>
+          </Space.Compact>
+        </Form.Item>
+        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+          单价用于折算费用（估算，可在「LLM 用量与余额」中查看）；Ollama 本地免费。
+        </Typography.Text>
       </Form>
     </Modal>
   )

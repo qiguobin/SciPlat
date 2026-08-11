@@ -30,20 +30,31 @@ def _safe_chat(db: Session, system: str, messages: list[dict]) -> str:
 
 
 # ================ LLM 配置 ================
+def _setting(db: Session, key: str) -> str:
+    s = db.query(models.Setting).filter_by(key=key).first()
+    return s.value if s else ""
+
+
 @router.get("/settings/llm")
 def get_llm_settings(db: Session = Depends(get_db)):
-    def v(key: str) -> str:
-        s = db.query(models.Setting).filter_by(key=key).first()
-        return s.value if s else ""
+    api_key = _setting(db, "llm_api_key")
+    model = _setting(db, "llm_model")
+    # 当前模型的元数据（上下文窗口 / 单价）
+    from ..services import llm as llm_service
 
-    api_key = v("llm_api_key")
+    llm_service.ensure_model_meta(db)
+    meta = db.query(models.LlmModelMeta).filter_by(model=model).first()
     return {
-        "provider": v("llm_provider") or "openai",
-        "base_url": v("llm_base_url"),
+        "provider": _setting(db, "llm_provider") or "openai",
+        "base_url": _setting(db, "llm_base_url"),
         "api_key_set": bool(api_key),
         "api_key": api_key,  # 本地单机，明文返回便于编辑
-        "model": v("llm_model"),
-        "ollama_url": v("llm_ollama_url") or "http://127.0.0.1:11434",
+        "model": model,
+        "ollama_url": _setting(db, "llm_ollama_url") or "http://127.0.0.1:11434",
+        "context_window": meta.context_window if meta else 0,
+        "input_price_per_m": meta.input_price_per_m if meta else 0,
+        "output_price_per_m": meta.output_price_per_m if meta else 0,
+        "cache_price_per_m": meta.cache_price_per_m if meta else 0,
     }
 
 
@@ -68,8 +79,127 @@ def update_llm_settings(body: dict, db: Session = Depends(get_db)):
             else:
                 db.add(models.Setting(key=storage_key, value=value))
             saved.append(storage_key)
+    # 模型元数据（上下文窗口 / 单价）存 llm_model_meta 表；空值/未填不覆盖
+    if any(k in body for k in ("context_window", "input_price_per_m", "output_price_per_m", "cache_price_per_m")):
+        from ..services import llm as llm_service
+
+        model_name = str(body.get("model") or _setting(db, "llm_model")).strip()
+        if model_name:
+            llm_service.ensure_model_meta(db)
+            meta = db.query(models.LlmModelMeta).filter_by(model=model_name).first()
+            if meta is None:
+                meta = models.LlmModelMeta(model=model_name)
+                db.add(meta)
+            for key, attr in (
+                ("context_window", "context_window"),
+                ("input_price_per_m", "input_price_per_m"),
+                ("output_price_per_m", "output_price_per_m"),
+                ("cache_price_per_m", "cache_price_per_m"),
+            ):
+                if key in body and body[key] not in (None, ""):
+                    try:
+                        setattr(meta, attr, float(body[key]) if "price" in key else int(body[key]))
+                    except (ValueError, TypeError):
+                        pass
+            saved.append("model_meta")
     db.commit()
     return {"ok": True, "saved": saved}
+
+
+# ================ LLM 用量 / 余额 / 模型元数据 ================
+BALANCE_CACHE_MINUTES = 10
+
+
+def _read_balance(db: Session, force: bool = False) -> dict:
+    """余额读取：手动填写值优先；DeepSeek 自动获取并缓存 10 分钟。"""
+    import json
+    from datetime import datetime, timedelta
+
+    from ..services import llm as llm_service
+
+    now = datetime.now()
+    manual = _setting(db, "llm_balance_manual")
+    cache_raw = _setting(db, "llm_balance_cache")
+    at_raw = _setting(db, "llm_balance_at")
+
+    fresh = False
+    if at_raw:
+        try:
+            fresh = (now - datetime.fromisoformat(at_raw)) < timedelta(minutes=BALANCE_CACHE_MINUTES)
+        except ValueError:
+            fresh = False
+
+    if force or not fresh:
+        result = llm_service.fetch_balance(db)
+        s = db.query(models.Setting).filter_by(key="llm_balance_cache").first()
+        if s:
+            s.value = json.dumps(result, ensure_ascii=False)
+        else:
+            db.add(models.Setting(key="llm_balance_cache", value=json.dumps(result, ensure_ascii=False)))
+        s2 = db.query(models.Setting).filter_by(key="llm_balance_at").first()
+        if s2:
+            s2.value = now.isoformat()
+        else:
+            db.add(models.Setting(key="llm_balance_at", value=now.isoformat()))
+        db.commit()
+    else:
+        try:
+            result = json.loads(cache_raw or "{}")
+        except json.JSONDecodeError:
+            result = {"is_available": False, "total_balance": 0.0, "currency": "CNY", "note": "余额缓存损坏"}
+
+    if manual:
+        try:
+            result = {**result, "is_available": True, "total_balance": float(manual), "manual": True}
+        except ValueError:
+            pass
+    result["fetched_at"] = _setting(db, "llm_balance_at")
+    return result
+
+
+@router.get("/llm/usage")
+def llm_usage(db: Session = Depends(get_db)):
+    """用量统计：今日/本月/累计 + 分模型明细。"""
+    from ..services import llm as llm_service
+
+    return llm_service.get_usage_summary(db)
+
+
+@router.get("/llm/balance")
+def llm_balance(db: Session = Depends(get_db)):
+    return _read_balance(db)
+
+
+@router.post("/llm/balance/refresh")
+def llm_balance_refresh(db: Session = Depends(get_db)):
+    return _read_balance(db, force=True)
+
+
+@router.put("/llm/balance")
+def llm_balance_set(body: dict, db: Session = Depends(get_db)):
+    """手动填写余额（空字符串清除手动值，恢复自动查询）。"""
+    manual = str(body.get("manual", "")).strip()
+    s = db.query(models.Setting).filter_by(key="llm_balance_manual").first()
+    if s:
+        s.value = manual
+    else:
+        db.add(models.Setting(key="llm_balance_manual", value=manual))
+    db.commit()
+    return _read_balance(db, force=True)
+
+
+@router.get("/llm/models")
+def llm_models(db: Session = Depends(get_db)):
+    """模型元数据列表（上下文窗口/单价，可编辑）。"""
+    from ..services import llm as llm_service
+
+    llm_service.ensure_model_meta(db)
+    rows = db.query(models.LlmModelMeta).order_by(models.LlmModelMeta.model).all()
+    return [{
+        "model": r.model, "context_window": r.context_window,
+        "input_price_per_m": r.input_price_per_m, "output_price_per_m": r.output_price_per_m,
+        "cache_price_per_m": r.cache_price_per_m, "currency": r.currency,
+    } for r in rows]
 
 
 @router.post("/llm/chat")

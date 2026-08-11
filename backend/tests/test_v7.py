@@ -468,3 +468,151 @@ def test_update_settings_source():
     # 恢复默认
     client.put("/api/settings/update", json={"source_url": ""})
     assert "github.com" in client.get("/api/settings/update").json()["source_url"]
+
+
+# ================ L 系列：LLM 用量 / 余额 / 上下文监控 ================
+
+def _setup_llm_cfg():
+    with SessionLocal() as db:
+        db.add(models.Setting(key="llm_base_url", value="https://api.deepseek.com/v1"))
+        db.add(models.Setting(key="llm_api_key", value="sk-test"))
+        db.add(models.Setting(key="llm_model", value="deepseek-chat"))
+        db.commit()
+
+
+def test_llm_usage_record_and_summary():
+    """chat 调用后 usage 落库（含缓存命中与费用折算）；聚合统计正确。"""
+    from unittest.mock import patch
+
+    from app.services import llm as llm_service
+
+    _setup_llm_cfg()
+    fake_resp = type("R", (), {"raise_for_status": lambda self: None, "json": lambda self: {
+        "choices": [{"message": {"content": " 回复 "}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150,
+                  "prompt_cache_hit_tokens": 40},
+    }})()
+
+    with patch("app.services.llm.httpx.post", return_value=fake_resp):
+        with SessionLocal() as db:
+            reply = llm_service.chat(db, "sys", [{"role": "user", "content": "hi"}])
+            assert reply == "回复"
+            rows = db.query(models.LlmUsageLog).all()
+            assert len(rows) == 1
+            row = rows[0]
+            assert row.model == "deepseek-chat"
+            assert row.prompt_tokens == 100 and row.completion_tokens == 50
+            assert row.cache_hit_tokens == 40
+            # 费用：miss 60/1M×2 + hit 40/1M×0.5 + out 50/1M×8 = 0.00054
+            assert abs(row.cost - 0.00054) < 1e-6
+            summary = llm_service.get_usage_summary(db)
+            assert summary["today"]["total_tokens"] == 150
+            assert summary["today"]["calls"] == 1
+            assert summary["by_model"][0]["model"] == "deepseek-chat"
+            # health 扩展字段
+            from app.main import app as fastapi_app
+            from fastapi.testclient import TestClient
+
+            h = TestClient(fastapi_app).get("/api/health").json()
+            assert h["llm_context_window"] == 128000
+            assert h["llm_usage_today"]["total_tokens"] == 150
+            assert h["ai_tasks_running"] == 0
+
+
+def test_llm_usage_ollama_branch():
+    """Ollama 分支：prompt_eval_count/eval_count 落库。"""
+    from unittest.mock import patch
+
+    from app.services import llm as llm_service
+
+    with SessionLocal() as db:
+        db.add(models.Setting(key="llm_provider", value="ollama"))
+        db.add(models.Setting(key="llm_model", value="qwen2.5"))
+        db.commit()
+    fake_resp = type("R", (), {"raise_for_status": lambda self: None, "json": lambda self: {
+        "message": {"content": "本地回复"},
+        "prompt_eval_count": 30,
+        "eval_count": 12,
+    }})()
+
+    with patch("app.services.llm.httpx.post", return_value=fake_resp):
+        with SessionLocal() as db:
+            assert llm_service.chat(db, "", [{"role": "user", "content": "hi"}]) == "本地回复"
+            row = db.query(models.LlmUsageLog).first()
+            assert row.provider == "ollama" and row.prompt_tokens == 30 and row.completion_tokens == 12
+            assert row.cost == 0.0  # 本地免费
+
+
+def test_llm_balance_flow():
+    """余额：DeepSeek 自动获取 + 10 分钟缓存 + 手动值优先。"""
+    from unittest.mock import patch
+
+    from app.routers.ai import _read_balance
+    from app.services import llm as llm_service
+
+    _setup_llm_cfg()
+    fake = type("R", (), {"raise_for_status": lambda self: None, "json": lambda self: {
+        "balance_infos": [{"total_balance": "12.34", "currency": "CNY"}],
+    }})()
+
+    with patch("app.services.llm.httpx.get", return_value=fake):
+        with SessionLocal() as db:
+            r = llm_service.fetch_balance(db)
+            assert r["is_available"] and r["total_balance"] == 12.34
+            # 首次 _read_balance：写入缓存
+            r1 = _read_balance(db)
+            assert r1["total_balance"] == 12.34
+            # 缓存命中：不应再请求外部
+            with patch("app.services.llm.httpx.get", side_effect=AssertionError("不应再请求")):
+                r2 = _read_balance(db)
+                assert r2["total_balance"] == 12.34
+
+    # 手动余额优先
+    with SessionLocal() as db:
+        s = db.query(models.Setting).filter_by(key="llm_balance_manual").first()
+        if s:
+            s.value = "99.9"
+        else:
+            db.add(models.Setting(key="llm_balance_manual", value="99.9"))
+        db.commit()
+        r3 = _read_balance(db)
+        assert r3["total_balance"] == 99.9 and r3.get("manual")
+
+    # Ollama / 其他服务商说明
+    with SessionLocal() as db:
+        s = db.query(models.Setting).filter_by(key="llm_provider").first()
+        if s:
+            s.value = "ollama"
+        else:
+            db.add(models.Setting(key="llm_provider", value="ollama"))
+        db.commit()
+        r4 = llm_service.fetch_balance(db)
+        assert r4["is_available"] is False and "本地" in r4["note"]
+
+
+def test_ai_task_counter():
+    """批任务计数器：进入 +1 退出 -1。"""
+    from app.services import llm as llm_service
+
+    assert llm_service.active_tasks() == 0
+    with llm_service.ai_task():
+        assert llm_service.active_tasks() == 1
+        with llm_service.ai_task():
+            assert llm_service.active_tasks() == 2
+        assert llm_service.active_tasks() == 1
+    assert llm_service.active_tasks() == 0
+
+
+def test_llm_models_meta_endpoint():
+    """模型元数据：预设种子 + 列表接口。"""
+    r = client.get("/api/llm/models")
+    assert r.status_code == 200
+    names = {m["model"] for m in r.json()}
+    assert "deepseek-chat" in names
+    meta = next(m for m in r.json() if m["model"] == "deepseek-chat")
+    assert meta["context_window"] == 128000 and meta["input_price_per_m"] == 2.0
+    # 通过 settings 接口编辑元数据
+    r = client.put("/api/settings/llm", json={"model": "deepseek-chat", "context_window": 65536, "input_price_per_m": 1.5})
+    assert r.status_code == 200
+    meta = next(m for m in client.get("/api/llm/models").json() if m["model"] == "deepseek-chat")
+    assert meta["context_window"] == 65536 and meta["input_price_per_m"] == 1.5

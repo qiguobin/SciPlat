@@ -2,7 +2,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -568,6 +568,37 @@ class Setting(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str] = mapped_column(String(100), unique=True)
     value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+# ---------------- LLM 用量与模型元数据 ----------------
+class LlmUsageLog(Base):
+    """LLM 调用用量日志：每次成功调用记一行（状态栏 tokens/费用统计）。"""
+    __tablename__ = "llm_usage_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(20), default="openai")  # openai / ollama
+    model: Mapped[str] = mapped_column(String(100), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_hit_tokens: Mapped[int] = mapped_column(Integer, default=0)   # 缓存命中（DeepSeek 等）
+    cost: Mapped[float] = mapped_column(Float, default=0.0)             # 折算费用（估算）
+    currency: Mapped[str] = mapped_column(String(10), default="CNY")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class LlmModelMeta(Base):
+    """模型元数据：上下文窗口 + 单价（预设种子 + 可编辑）。"""
+    __tablename__ = "llm_model_meta"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model: Mapped[str] = mapped_column(String(100), unique=True)
+    context_window: Mapped[int] = mapped_column(Integer, default=0)        # 0=未知
+    input_price_per_m: Mapped[float] = mapped_column(Float, default=0.0)   # 每百万 tokens 输入价
+    output_price_per_m: Mapped[float] = mapped_column(Float, default=0.0)  # 每百万 tokens 输出价
+    cache_price_per_m: Mapped[float] = mapped_column(Float, default=0.0)   # 缓存命中价（0=同输入价）
+    currency: Mapped[str] = mapped_column(String(10), default="CNY")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
 

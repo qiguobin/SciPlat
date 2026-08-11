@@ -193,9 +193,10 @@ def network(tag: Optional[str] = None, min_weight: int = 0, db: Session = Depend
 @router.post("/ai-auto-link")
 def ai_auto_link(db: Session = Depends(get_db)):
     """一键执行 AI 自动关联：文本相似 + 结构化特征双路候选 → LLM 批量评分 → 持久化覆盖旧结果。"""
-    from ..services import ai_link
+    from ..services import ai_link, llm as llm_service
 
-    stats = ai_link.run_auto_link(db)
+    with llm_service.ai_task():
+        stats = ai_link.run_auto_link(db)
     if stats["created"] == 0:
         return {
             **stats,
@@ -312,6 +313,8 @@ def ai_metadata(rid: int, db: Session = Depends(get_db)):
 @router.post("/ai-match")
 def ai_match(body: dict, db: Session = Depends(get_db)):
     """批量 AI 补全：默认只处理信息不完整的文献（缺 DOI/期刊/年份/分区之一），逐篇补全。"""
+    from ..services import llm as llm_service
+
     limit = max(1, min(int(body.get("limit", 20)), 50))
     only_incomplete = body.get("only_incomplete", True)
     query = db.query(models.Reference)
@@ -326,12 +329,13 @@ def ai_match(body: dict, db: Session = Depends(get_db)):
         ))
     refs = query.order_by(models.Reference.updated_at.desc()).limit(limit).all()
     results = []
-    for ref in refs:
-        try:
-            r = _ai_metadata_for(db, ref)
-            results.append({"id": ref.id, "filled": r["filled"], "source": r["source"]})
-        except Exception:
-            results.append({"id": ref.id, "filled": [], "source": "error"})
+    with llm_service.ai_task():
+        for ref in refs:
+            try:
+                r = _ai_metadata_for(db, ref)
+                results.append({"id": ref.id, "filled": r["filled"], "source": r["source"]})
+            except Exception:
+                results.append({"id": ref.id, "filled": [], "source": "error"})
     filled_total = sum(len(r["filled"]) for r in results)
     return {
         "processed": len(results),

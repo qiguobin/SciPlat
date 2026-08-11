@@ -26,6 +26,7 @@ import NotificationCenter from './NotificationCenter'
 import LlmSettings from './LlmSettings'
 import StatusBar from './StatusBar'
 import UpdateChecker from './UpdateChecker'
+import LlmUsageModal from './LlmUsageModal'
 import { useAppStore } from '../store'
 
 const MENU_GROUPS = [
@@ -113,6 +114,7 @@ export default function AppLayout() {
   const [dataOpen, setDataOpen] = useState(false)
   const [llmOpen, setLlmOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
   const theme = useAppStore((s) => s.theme)
   const toggleTheme = useAppStore((s) => s.toggleTheme)
   const root = '/' + (loc.pathname.split('/')[1] || '')
@@ -232,11 +234,12 @@ export default function AppLayout() {
             </div>
           </div>
         </Layout.Content>
-        {/* 底部状态栏：数据库 / 版本 / LLM / 错误监控 / 检查更新 */}
+        {/* 底部状态栏：数据库 / 版本 / LLM 用量余额 / 错误监控 / 检查更新 */}
         <StatusBar
           onOpenData={() => setDataOpen(true)}
           onOpenLlm={() => setLlmOpen(true)}
           onOpenUpdate={() => setUpdateOpen(true)}
+          onOpenUsage={() => setUsageOpen(true)}
         />
       </Layout>
 
@@ -244,6 +247,7 @@ export default function AppLayout() {
       <LlmSettings open={llmOpen} onClose={() => setLlmOpen(false)} />
       <DataManager open={dataOpen} onClose={() => setDataOpen(false)} />
       <UpdateChecker open={updateOpen} onClose={() => setUpdateOpen(false)} />
+      <LlmUsageModal open={usageOpen} onClose={() => setUsageOpen(false)} onOpenLlm={() => { setUsageOpen(false); setLlmOpen(true) }} />
     </Layout>
   )
 }

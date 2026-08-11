@@ -164,6 +164,23 @@ def health(db: Session = Depends(get_db)):
         models.SystemEvent.created_at >= since,
     ).count()
     cfg = llm_service._get_cfg(db)
+
+    # LLM 监控：上下文窗口 / 余额缓存 / 今日用量 / 批任务数（状态栏 10s 轮询，零外部请求）
+    import json as _json
+
+    meta = None
+    if cfg["model"]:
+        llm_service.ensure_model_meta(db)
+        meta = db.query(models.LlmModelMeta).filter_by(model=cfg["model"]).first()
+    usage_today = llm_service.get_usage_summary(db)["today"]
+    balance = None
+    cache_row = db.query(models.Setting).filter_by(key="llm_balance_cache").first()
+    if cache_row and cache_row.value:
+        try:
+            balance = _json.loads(cache_row.value)
+        except _json.JSONDecodeError:
+            balance = None
+
     return {
         "status": "ok",
         "version": config.APP_VERSION,
@@ -174,6 +191,14 @@ def health(db: Session = Depends(get_db)):
         "llm_configured": llm_service.is_configured(db),
         "llm_provider": cfg["provider"],
         "llm_model": cfg["model"],
+        "llm_context_window": meta.context_window if meta else 0,
+        "llm_balance": balance,
+        "llm_usage_today": {
+            "total_tokens": usage_today["total_tokens"],
+            "cost": usage_today["cost"],
+            "calls": usage_today["calls"],
+        },
+        "ai_tasks_running": llm_service.active_tasks(),
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         "error_count": error_count,
         "uptime_seconds": int(datetime.now().timestamp() - _main_uptime()),

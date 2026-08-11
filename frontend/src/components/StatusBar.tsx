@@ -17,6 +17,10 @@ interface Health {
   llm_configured: boolean
   llm_provider: string
   llm_model: string
+  llm_context_window: number
+  llm_balance: { is_available: boolean; total_balance: number; currency: string; note?: string; manual?: boolean } | null
+  llm_usage_today: { total_tokens: number; cost: number; calls: number }
+  ai_tasks_running: number
   python: string
   error_count: number
   uptime_seconds: number
@@ -32,17 +36,22 @@ interface SysEvent {
 
 const fmtSize = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1024).toFixed(0)} KB`)
 
+const fmtTokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n))
+
+const fmtCost = (n: number) => (n >= 100 ? n.toFixed(0) : n >= 1 ? n.toFixed(2) : n.toFixed(4))
+
 const fmtUptime = (s: number) => {
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
   return h > 0 ? `${h}h${m}m` : `${m}m`
 }
 
-/** 底部状态栏：服务/数据库/版本/LLM/错误计数（10s 轮询 /health） */
-export default function StatusBar({ onOpenData, onOpenLlm, onOpenUpdate }: {
+/** 底部状态栏：服务/数据库/版本/LLM（上下文·余额·用量·子任务）/错误计数 */
+export default function StatusBar({ onOpenData, onOpenLlm, onOpenUpdate, onOpenUsage }: {
   onOpenData?: () => void
   onOpenLlm?: () => void
   onOpenUpdate?: () => void
+  onOpenUsage?: () => void
 }) {
   const [health, setHealth] = useState<Health | null>(null)
   const [online, setOnline] = useState(true)
@@ -124,12 +133,34 @@ export default function StatusBar({ onOpenData, onOpenLlm, onOpenUpdate }: {
             </span>
           </Tooltip>
 
-          <Tooltip title={health?.llm_configured ? '已配置 LLM' : '未配置 LLM，点击打开 AI 设置'}>
-            <span className="statusbar-item statusbar-click" onClick={onOpenLlm}>
+          <Tooltip title={health?.llm_configured
+            ? 'LLM 用量/余额/上下文（点击查看详情；配置见顶栏 ⚙️）'
+            : '未配置 LLM，点击打开 AI 设置'}>
+            <span className="statusbar-item statusbar-click" onClick={health?.llm_configured ? onOpenUsage : onOpenLlm}>
               <RobotOutlined />
-              {health?.llm_configured
-                ? <span className="statusbar-llm">🤖 {health.llm_model || health.llm_provider}</span>
-                : <span className="statusbar-dim">LLM 未配置</span>}
+              {health?.llm_configured ? (
+                <>
+                  <span className="statusbar-llm">
+                    🤖 {health.llm_model || health.llm_provider}
+                    {health.llm_context_window > 0 && <span className="statusbar-dim">（{Math.round(health.llm_context_window / 1024)}K）</span>}
+                  </span>
+                  <span className="statusbar-dim">
+                    {health.llm_balance?.is_available
+                      ? `💰 ${health.llm_balance.currency === 'USD' ? '$' : '¥'}${health.llm_balance.total_balance}${health.llm_balance.manual ? '(手动)' : ''}`
+                      : '💰 不可查'}
+                  </span>
+                  {health.llm_usage_today && health.llm_usage_today.calls > 0 && (
+                    <span className="statusbar-dim">
+                      ⚡ 今日 {fmtTokens(health.llm_usage_today.total_tokens)} tok · {fmtCost(health.llm_usage_today.cost)}
+                    </span>
+                  )}
+                  <span className={health.ai_tasks_running > 0 ? 'statusbar-error' : 'statusbar-dim'}>
+                    {health.ai_tasks_running > 0 ? `🟡 AI 子任务 ${health.ai_tasks_running}` : '🟢 无子任务'}
+                  </span>
+                </>
+              ) : (
+                <span className="statusbar-dim">LLM 未配置</span>
+              )}
             </span>
           </Tooltip>
 

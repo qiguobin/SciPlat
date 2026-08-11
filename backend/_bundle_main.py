@@ -79,6 +79,11 @@ def _wait_ready(timeout: float = 30.0) -> bool:
     return False
 
 
+# 模块级窗口引用：进度回调使用（不能挂到 js_api 实例属性上——
+# Window 内部持有 js_api 引用，实例属性会导致循环引用 → pywebview 递归溢出卡死）
+_WINDOW = None
+
+
 class UpdateApi:
     """pywebview js_api：前端一键升级能力（下载安装包 → SHA256 校验 → 静默安装）。"""
 
@@ -146,8 +151,10 @@ class UpdateApi:
         return {"ok": True}
 
     def _progress(self, pct: int) -> None:
+        global _WINDOW
         try:
-            self.window.evaluate_js(f"window.__updateProgress && window.__updateProgress({pct})")
+            if _WINDOW is not None:
+                _WINDOW.evaluate_js(f"window.__updateProgress && window.__updateProgress({pct})")
         except Exception:  # noqa: BLE001
             pass
 
@@ -187,7 +194,7 @@ if __name__ == "__main__":
             background_color="#0B1120",
             js_api=update_api,
         )
-    # pywebview 6.x 不再自动注入 window 属性到 js_api 实例，需手动绑定（进度回调依赖）
-    update_api.window = _win
+    # 窗口引用存入模块级变量（实例属性会造成循环引用卡死）
+    _WINDOW = _win
     webview.start()
     # 窗口关闭 → 主进程退出（daemon 服务线程随之结束）

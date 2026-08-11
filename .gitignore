@@ -10,8 +10,9 @@ backend/dist/
 node_modules/
 frontend/dist/
 
-# 桌面端打包产物
-desktop/release/
+# 桌面端打包产物（latest.json 需入库，供 Gitee/内网 raw 直链使用）
+desktop/release/*
+!desktop/release/latest.json
 desktop/node_modules/
 
 # 运行时数据（数据库 + 上传文件）——含 LLM API Key，严禁提交

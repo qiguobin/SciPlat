@@ -141,3 +141,20 @@ scripts\publish-oss.bat                         :: 对象存储一键发布（�
 | GitHub Releases | 默认渠道，无需服务器 |
 
 > 安全：下载后强制 SHA256 校验，内网 HTTP 源同样防篡改；建议公网源使用 HTTPS。
+
+### Gitee 发布（国内直连，无需代理）
+Gitee Releases 的附件 URL 带 tag 会变，因此 **latest.json 提交进仓库**（raw 直链恒定），安装包放 Releases 附件：
+
+1. 构建：`scripts\build-release.bat`
+2. 生成 Gitee 版版本信息：
+   ```bat
+   python scripts\gen_latest.py --gitee-user 你的用户名 --gitee-repo SciPlat
+   ```
+3. 提交推送 `desktop\release\latest.json`（该文件已入库，不随安装包忽略）
+4. 在 Gitee 仓库创建 Release（tag 如 `v0.4.0`），上传 `SciPlatSetup-0.4.0.exe`
+5. 客户端更新源（raw 直链，分支按仓库实际默认分支替换 main/master）：
+   ```
+   https://gitee.com/你的用户名/SciPlat/raw/main/desktop/release/latest.json
+   ```
+
+> Gitee 发布与 GitHub/OSS 完全等价——同一套 latest.json 协议，切换渠道只需换更新源 URL。

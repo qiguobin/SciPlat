@@ -64,10 +64,17 @@ def _get_cfg(db) -> dict:
         s = db.execute(__import__("sqlalchemy").text("SELECT value FROM settings WHERE key = :k"), {"k": key}).first()
         return (s[0] if s else "") or ""
 
+    api_key_raw = v("llm_api_key")
+    api_key = api_key_raw
+    if v("llm_api_key_encrypted") == "1" and api_key_raw:
+        from . import crypto
+
+        api_key = crypto.decrypt_text(api_key_raw)  # 解密失败返回空 → 视为未配置
+
     cfg = {
         "provider": v("llm_provider") or "openai",
         "base_url": v("llm_base_url"),
-        "api_key": v("llm_api_key"),
+        "api_key": api_key,
         "model": v("llm_model"),
         "ollama_url": v("llm_ollama_url") or "http://127.0.0.1:11434",
     }

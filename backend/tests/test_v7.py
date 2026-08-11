@@ -683,3 +683,122 @@ def test_balance_moonshot():
         with SessionLocal() as db:
             r = llm_service.fetch_balance(db)
             assert r["is_available"] and r["total_balance"] == 88.88
+
+
+# ================ M2 系列：Key 加密 / 备份校验加密 / WebDAV ================
+
+def test_api_key_encryption_roundtrip():
+    """API Key 加密：加密存储 → 解密读取 → 设置接口往返。"""
+    from app.services import crypto, llm as llm_service
+
+    _setup_llm_cfg()
+    # 明文存储 → 迁移加密
+    with SessionLocal() as db:
+        s = db.query(models.Setting).filter_by(key="llm_api_key").first()
+        assert s.value == "sk-test"
+        s.value = crypto.encrypt_text("sk-test")
+        flag = db.query(models.Setting).filter_by(key="llm_api_key_encrypted").first()
+        if flag:
+            flag.value = "1"
+        else:
+            db.add(models.Setting(key="llm_api_key_encrypted", value="1"))
+        db.commit()
+        # 解密读取
+        cfg = llm_service._get_cfg(db)
+        assert cfg["api_key"] == "sk-test"
+        # 密文非明文
+        s2 = db.query(models.Setting).filter_by(key="llm_api_key").first()
+        assert s2.value != "sk-test"
+
+    # 设置接口：保存后加密存储、GET 解密返回
+    r = client.put("/api/settings/llm", json={"api_key": "sk-new-123"})
+    assert r.status_code == 200
+    with SessionLocal() as db:
+        stored = db.query(models.Setting).filter_by(key="llm_api_key").first()
+        assert stored.value != "sk-new-123"  # 已加密
+    r = client.get("/api/settings/llm")
+    assert r.json()["api_key"] == "sk-new-123"
+
+    # 解密失败（密钥丢失场景）→ 返回空
+    with SessionLocal() as db:
+        s = db.query(models.Setting).filter_by(key="llm_api_key").first()
+        s.value = "坏数据"
+        db.commit()
+        assert llm_service._get_cfg(db)["api_key"] == ""
+
+
+def test_backup_sha256_and_encrypt():
+    """备份：SHA256 伴随文件 + 密码加密/解密恢复。"""
+    from app.routers import backup as backup_router
+    from app.services import crypto
+
+    # 生成自动备份（force）
+    result = backup_router._auto_backup(force=True)
+    fname = result["created"]
+    auto_dir = __import__("pathlib").Path(".").resolve()
+    # 定位自动备份目录
+    from app import config
+
+    auto_dir = config.DATA_DIR / backup_router.AUTO_BACKUP_DIR_NAME
+    f = auto_dir / fname
+    assert f.exists()
+    sha_file = auto_dir / f"{fname}.sha256"
+    assert sha_file.exists()
+
+    # 列表接口带 sha256
+    r = client.get("/api/backup/auto-list")
+    items = r.json()["items"]
+    assert any(i["name"] == fname and i["sha256"] for i in items)
+
+    # 密码加密
+    raw = f.read_bytes()
+    r = client.post("/api/backup/encrypt", json={"name": fname, "password": "secret123"})
+    assert r.status_code == 200
+    enc_name = r.json()["enc_name"]
+    enc = (auto_dir / enc_name).read_bytes()
+    assert crypto.decrypt_bytes(enc, "secret123") == raw  # 加解密往返
+    with __import__("pytest").raises(Exception):
+        crypto.decrypt_bytes(enc, "wrong")  # 错误密码抛异常
+
+
+def test_webdav_service_mock():
+    """WebDAV 服务：上传/列表/下载（mock httpx）。"""
+    from unittest.mock import patch
+
+    from app.services import webdav
+
+    xml_resp = (
+        '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">'
+        '<d:response><d:href>/dav/sciplat/backup-1.zip</d:href>'
+        '<d:propstat><d:prop><d:getcontentlength>1234</d:getcontentlength>'
+        '<d:getlastmodified>Mon, 11 Aug 2026 10:00:00 GMT</d:getlastmodified>'
+        '<d:resourcetype/></d:prop></d:propstat></d:response>'
+        '</d:multistatus>'
+    )
+    fake = type("R", (), {"raise_for_status": lambda self: None, "text": xml_resp, "content": b"zipdata"})()
+    with patch("app.services.webdav.httpx.request", return_value=fake), \
+         patch("app.services.webdav.httpx.put", return_value=fake), \
+         patch("app.services.webdav.httpx.get", return_value=fake):
+        ok, note = webdav.test_connection("https://dav.test.com/sciplat", "u", "p")
+        assert ok
+        items = webdav.list_files("https://dav.test.com/sciplat", "u", "p")
+        assert items[0]["name"] == "backup-1.zip" and items[0]["size"] == 1234
+        assert webdav.download("https://dav.test.com/sciplat", "u", "p", "backup-1.zip") == b"zipdata"
+
+
+def test_webdav_settings_endpoints():
+    """WebDAV 设置存取（密码加密）。"""
+    r = client.put("/api/backup/webdav/settings", json={
+        "url": "https://dav.jianguoyun.com/dav/sciplat", "user": "test@mail.com",
+        "pass": "mypass", "enabled": False,
+    })
+    assert r.status_code == 200
+    with SessionLocal() as db:
+        stored = db.query(models.Setting).filter_by(key="webdav_pass").first()
+        assert stored.value != "mypass"  # 已加密
+    r = client.get("/api/backup/webdav/settings")
+    d = r.json()
+    assert d["url"].endswith("/sciplat") and d["user"] == "test@mail.com"
+    # 未启用时上传被拒
+    r = client.post("/api/backup/webdav/upload", json={})
+    assert r.status_code == 400

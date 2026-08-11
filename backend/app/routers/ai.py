@@ -37,7 +37,12 @@ def _setting(db: Session, key: str) -> str:
 
 @router.get("/settings/llm")
 def get_llm_settings(db: Session = Depends(get_db)):
-    api_key = _setting(db, "llm_api_key")
+    api_key_raw = _setting(db, "llm_api_key")
+    api_key = api_key_raw
+    if _setting(db, "llm_api_key_encrypted") == "1" and api_key_raw:
+        from ..services import crypto
+
+        api_key = crypto.decrypt_text(api_key_raw)
     model = _setting(db, "llm_model")
     # 当前模型的元数据（上下文窗口 / 单价）
     from ..services import llm as llm_service
@@ -48,7 +53,7 @@ def get_llm_settings(db: Session = Depends(get_db)):
         "provider": _setting(db, "llm_provider") or "openai",
         "base_url": _setting(db, "llm_base_url"),
         "api_key_set": bool(api_key),
-        "api_key": api_key,  # 本地单机，明文返回便于编辑
+        "api_key": api_key,  # 本地单机，解密返回明文便于编辑
         "model": model,
         "ollama_url": _setting(db, "llm_ollama_url") or "http://127.0.0.1:11434",
         "context_window": meta.context_window if meta else 0,
@@ -73,8 +78,18 @@ def update_llm_settings(body: dict, db: Session = Depends(get_db)):
     saved = []
     for front_key, storage_key in key_map.items():
         if front_key in body:
-            s = db.query(models.Setting).filter_by(key=storage_key).first()
             value = str(body[front_key] or "")
+            # API Key 加密入库（Fernet）
+            if storage_key == "llm_api_key" and value:
+                from ..services import crypto
+
+                value = crypto.encrypt_text(value)
+                flag = db.query(models.Setting).filter_by(key="llm_api_key_encrypted").first()
+                if flag:
+                    flag.value = "1"
+                else:
+                    db.add(models.Setting(key="llm_api_key_encrypted", value="1"))
+            s = db.query(models.Setting).filter_by(key=storage_key).first()
             if s:
                 s.value = value
             else:

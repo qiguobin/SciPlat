@@ -84,9 +84,34 @@ def _tracker_loop() -> None:
             pass
 
 
+def _migrate_api_key_encryption() -> None:
+    """启动迁移（幂等）：明文 llm_api_key → Fernet 加密 + 标记。密钥文件随数据目录走。"""
+    try:
+        from . import models
+        from .database import SessionLocal
+        from .services import crypto
+
+        db = SessionLocal()
+        try:
+            s = db.query(models.Setting).filter_by(key="llm_api_key").first()
+            flag = db.query(models.Setting).filter_by(key="llm_api_key_encrypted").first()
+            if s and s.value and not (flag and flag.value == "1"):
+                s.value = crypto.encrypt_text(s.value)
+                if flag:
+                    flag.value = "1"
+                else:
+                    db.add(models.Setting(key="llm_api_key_encrypted", value="1"))
+                db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    _migrate_api_key_encryption()
     # 启动时自动备份（距上次 >7 天）
     try:
         backup._auto_backup()

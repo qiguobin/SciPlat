@@ -109,9 +109,9 @@ export default function UpdateChecker({ open, onClose }: { open: boolean; onClos
       ) : busy ? (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <Typography.Text>
-            {phase === 'downloading' && '正在下载新版本…'}
+            {phase === 'downloading' && '正在下载新版本（约 38MB，进度可能缓慢更新）…'}
             {phase === 'verifying' && '下载完成，正在校验文件完整性（SHA256）…'}
-            {phase === 'installing' && '正在静默安装，完成后将自动重启新版…'}
+            {phase === 'installing' && '正在静默安装，应用将自动重启，请稍候…'}
           </Typography.Text>
           <Progress percent={progress} status="active" />
         </Space>

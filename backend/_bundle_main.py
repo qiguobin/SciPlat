@@ -166,7 +166,7 @@ if __name__ == "__main__":
         icon = ico
     update_api = UpdateApi()
     try:
-        webview.create_window(
+        _win = webview.create_window(
             "SciPlat 博士生科研管理平台",
             f"http://{SERVER}:{port}/",
             width=1440,
@@ -178,7 +178,7 @@ if __name__ == "__main__":
         )
     except TypeError:
         # 旧版 pywebview 无 icon/js_api 参数时降级
-        webview.create_window(
+        _win = webview.create_window(
             "SciPlat 博士生科研管理平台",
             f"http://{SERVER}:{port}/",
             width=1440,
@@ -187,5 +187,7 @@ if __name__ == "__main__":
             background_color="#0B1120",
             js_api=update_api,
         )
+    # pywebview 6.x 不再自动注入 window 属性到 js_api 实例，需手动绑定（进度回调依赖）
+    update_api.window = _win
     webview.start()
     # 窗口关闭 → 主进程退出（daemon 服务线程随之结束）

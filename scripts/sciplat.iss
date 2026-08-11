@@ -2,7 +2,7 @@
 ; 编译：ISCC.exe scripts\sciplat.iss
 ; 产物：desktop\release\SciPlatSetup-0.4.0.exe
 #define MyAppName "SciPlat"
-#define MyAppVersion "0.6.0"
+#define MyAppVersion "0.6.1"
 #define MyAppExeName "SciPlat.exe"
 
 [Setup]

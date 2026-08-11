@@ -1,8 +1,8 @@
 {
-  "version": "0.4.0",
-  "url": "https://gitee.com/qiguobin/SciPlat/releases/download/v0.4.0/SciPlatSetup-0.4.0.exe",
-  "sha256": "1d0b15436a7486ff465669d3d9cebf7374ccc056f3442f92119fb0bbfbaea1cb",
-  "notes": "Gitee 发布测试",
+  "version": "0.5.0",
+  "url": "https://github.com/qiguobin/SciPlat/releases/latest/download/SciPlatSetup-0.5.0.exe",
+  "sha256": "99585dc5d2c8c45f7a6502e299a0b80d5052a85114d4009ecc0f65abc30ae121",
+  "notes": "## v0.5.0 更新内容\n\n- 🚀 新增自动更新：检测 → 发布说明 → 一键下载（SHA256 校验）→ 静默升级 → 自动重启\n- 🌐 更新源支持 Gitee / 对象存储（OSS/COS）/ 内网服务器\n- 📊 状态栏新增 LLM 监控：上下文窗口、余额、今日 tokens 与费用、子任务状态\n- 🔧 修复：快速继续卡片为空、期刊名溢出、AI 自动关联无法生成、浅色模式菜单不可见等",
   "mandatory": false,
   "published_at": ""
 }

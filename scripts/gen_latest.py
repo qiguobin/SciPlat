@@ -36,6 +36,16 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def sync_iss(version: str) -> None:
+    """同步 sciplat.iss 版本号（消除硬编码漂移）。"""
+    iss = ROOT / "scripts" / "sciplat.iss"
+    text = iss.read_text(encoding="utf-8")
+    new_text = re.sub(r'#define MyAppVersion ".*?"', f'#define MyAppVersion "{version}"', text)
+    if new_text != text:
+        iss.write_text(new_text, encoding="utf-8")
+        print(f"已同步 sciplat.iss 版本号 → {version}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="生成 latest.json 更新版本信息")
     parser.add_argument("--url-prefix", default="",
@@ -45,21 +55,21 @@ def main() -> int:
     parser.add_argument("--gitee-tag", default="", help="Gitee Release tag（默认 v{版本号}）")
     parser.add_argument("--notes", default="", help="发布说明（Markdown）")
     parser.add_argument("--mandatory", action="store_true", help="标记为强制更新")
+    parser.add_argument("--sync-iss", action="store_true",
+                        help="仅同步 sciplat.iss 版本号后退出（编译安装包前调用）")
     args = parser.parse_args()
 
     version = config.APP_VERSION
+    if args.sync_iss:
+        sync_iss(version)
+        return 0
+
     setup = ROOT / "desktop" / "release" / f"SciPlatSetup-{version}.exe"
     if not setup.exists():
         print(f"未找到安装包：{setup}（请先运行 build-release.bat）", file=sys.stderr)
         return 1
 
-    # 同步 sciplat.iss 版本号（消除硬编码漂移）
-    iss = ROOT / "scripts" / "sciplat.iss"
-    text = iss.read_text(encoding="utf-8")
-    new_text = re.sub(r'#define MyAppVersion ".*?"', f'#define MyAppVersion "{version}"', text)
-    if new_text != text:
-        iss.write_text(new_text, encoding="utf-8")
-        print(f"已同步 sciplat.iss 版本号 → {version}")
+    sync_iss(version)
 
     if args.gitee_user:
         # Gitee 模式：安装包放 Releases 附件（带 tag），latest.json 提交入库走 raw 直链

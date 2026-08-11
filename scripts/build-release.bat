@@ -15,7 +15,8 @@ popd
 echo [2/4] 打包 SciPlat.exe（PyInstaller + pywebview）...
 call .venv\Scripts\python.exe -m PyInstaller desktop\backend.spec --noconfirm --distpath backend\dist --workpath backend\build\pyinstaller --clean || goto :fail
 
-echo [3/4] 编译安装包（Inno Setup）...
+echo [3/4] 同步版本号并编译安装包（Inno Setup）...
+call .venv\Scripts\python.exe scripts\gen_latest.py --sync-iss || goto :fail
 set "ISCC="
 if exist "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" set "ISCC=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if exist "D:\Program Files (x86)\Inno Setup 6\ISCC.exe" set "ISCC=D:\Program Files (x86)\Inno Setup 6\ISCC.exe"

@@ -1,8 +1,8 @@
 {
-  "version": "0.6.2",
-  "url": "https://gitee.com/oldhenpussy/sciplat/releases/download/v0.6.2/SciPlatSetup-0.6.2.exe",
-  "sha256": "77459db5d389ee046077f1861dac9b56f915d8fde1fb8fb228e162e85e74c7c4",
-  "notes": "## v0.6.2 修复启动卡死\n\n- 🔧 修复 v0.6.1 桌面版启动卡死（pywebview 循环引用 → 模块级窗口引用）\n- ⚠️ 请用本版本替代 v0.6.1（0.6.1 勿用）",
+  "version": "0.7.0",
+  "url": "https://gitee.com/oldhenpussy/SciPlat/releases/download/v0.7.0/SciPlatSetup-0.7.0.exe",
+  "sha256": "30c10a7b6290df7ff3dd19cf20659e3891705ba75899af03b778e1e2a5508759",
+  "notes": "# SciPlat v0.7.0\n\n## ✨ AI 关联图谱深度解析\n- LLM 现在基于每篇文献的**摘要 + 全文内容**深度评分关联强度（方法/结论/理论/引用依赖），不再只是标签与领域对比\n- 评分前自动提取 PDF 全文，保证 LLM 有内容可分析\n- 未配置 LLM / 评分失败时**明确提示降级**，不再静默伪装成 AI 关联\n\n## 🗂️ 多工作区\n- 独立数据目录：文献库、PDF 附件、笔记、设置按课题完全隔离\n- 顶栏「工作区」：创建/切换/注销，切换后自动刷新\n- 旧数据自动成为「默认」工作区，升级无感\n\n## 📚 文献匹配多来源\n- 新增 PubMed（E-utilities）来源：DOI 自动回退 + 标题检索\n- 新增 OpenAlex 中文文献匹配（中文期刊收录充分）\n- 编辑弹窗「从标题匹配」：多来源候选选择回填\n\n## 🔧 其他\n- 文献列表勾选列宽度压缩（~32px）",
   "mandatory": false,
   "published_at": ""
 }

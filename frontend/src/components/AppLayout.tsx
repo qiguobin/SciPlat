@@ -27,6 +27,7 @@ import LlmSettings from './LlmSettings'
 import StatusBar from './StatusBar'
 import UpdateChecker from './UpdateChecker'
 import LlmUsageModal from './LlmUsageModal'
+import WorkspaceModal from './WorkspaceModal'
 import { useAppStore } from '../store'
 
 const MENU_GROUPS = [
@@ -115,6 +116,7 @@ export default function AppLayout() {
   const [llmOpen, setLlmOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  const [wsOpen, setWsOpen] = useState(false)
   const theme = useAppStore((s) => s.theme)
   const toggleTheme = useAppStore((s) => s.toggleTheme)
   const root = '/' + (loc.pathname.split('/')[1] || '')
@@ -217,6 +219,7 @@ export default function AppLayout() {
           />
           <Button type="text" icon={<SettingOutlined />} title="AI 设置（LLM）" onClick={() => setLlmOpen(true)} />
           <NotificationCenter />
+          <Button type="text" icon={<FolderOpenOutlined />} title="工作区（独立数据目录）" onClick={() => setWsOpen(true)} />
           <Button type="text" icon={<DatabaseOutlined />} title="数据管理（备份/恢复）" onClick={() => setDataOpen(true)} />
           <Button
             type="text"
@@ -248,6 +251,7 @@ export default function AppLayout() {
       <DataManager open={dataOpen} onClose={() => setDataOpen(false)} />
       <UpdateChecker open={updateOpen} onClose={() => setUpdateOpen(false)} />
       <LlmUsageModal open={usageOpen} onClose={() => setUsageOpen(false)} onOpenLlm={() => { setUsageOpen(false); setLlmOpen(true) }} />
+      <WorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} />
     </Layout>
   )
 }

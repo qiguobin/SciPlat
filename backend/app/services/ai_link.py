@@ -1,11 +1,12 @@
-"""AI 自动关联：本地 TF-IDF 相似度预筛 + LLM 批量语义评分。
+"""AI 自动关联：本地 TF-IDF 相似度召回候选 + LLM 深度语义评分。
 
 流程：
-1. 本地 TF-IDF（纯 Python，标题×2 + 摘要 + 关键词）两两余弦相似度，
-   按阈值筛出候选对（上限 MAX_PAIRS），秒级完成、无需联网；
-2. 候选对分批交给 LLM 做语义评分（输出权重 + 理由 + 标签）；
-3. LLM 未配置 / 解析失败时自动降级为纯本地权重（weight = cos×80，上限 70），
-   保证功能离线可用。
+1. 本地 TF-IDF（纯 Python，标题×2 + 摘要 + 关键词 + 全文片段）两两余弦相似度，
+   按阈值召回候选对（上限 MAX_PAIRS），秒级完成、无需联网——只做「召回」，不做最终判断；
+2. 候选对分批交给 LLM 深度评分：每篇文献注入标题/作者/期刊/年份 + 摘要/全文片段，
+   由 LLM 基于论文内容判断关联强度（权重 + 理由 + 标签）；
+3. 未配置 LLM / LLM 评分失败时降级为本地特征权重，但**必须通过 warnings 明确告知用户**，
+   不再静默伪装成「AI 关联」。
 
 结果持久化到 reference_ai_links 表，重新生成时整体覆盖。
 """
@@ -21,8 +22,12 @@ from ..database import SessionLocal
 
 SIM_THRESHOLD = 0.12      # 候选对余弦相似度下限
 MAX_PAIRS = 80            # 候选对总数上限
-BATCH_SIZE = 20           # 每批交给 LLM 的文献对数
+BATCH_SIZE = 20           # 每批交给 LLM 的文献对数（浅模式）
+BATCH_SIZE_DEEP = 10      # 深度模式批次（内容更长，控 token）
 LOCAL_CAP = 70            # 本地降级权重上限
+DEEP_FULL_TEXT_CHARS = 1200  # 深度模式注入每篇的全文片段长度
+RECALL_FULL_TEXT_CHARS = 2000  # 候选召回纳入词频的全文片段长度
+EXTRACT_PDF_LIMIT = 30    # 评分前自动提取全文的篇数上限
 
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 _LATIN = re.compile(r"[a-z0-9]{2,}")
@@ -39,16 +44,19 @@ def _tokens(text: str) -> list[str]:
 
 
 def _build_docs(refs: list) -> list[tuple[int, Counter]]:
-    """每条文献 → (id, 词频 Counter)，标题权重 ×2。"""
+    """每条文献 → (id, 词频 Counter)，标题权重 ×2，含摘要/关键词/全文片段。"""
     docs: list[tuple[int, Counter]] = []
     for r in refs:
         title = r.title or ""
         summary = ""
         keywords = ""
+        fulltext = ""
         if r.text:
             summary = r.text.summary or ""
             keywords = r.text.keywords or ""
-        counter = Counter(_tokens(f"{title} {title} {summary} {keywords}"))
+            if r.text.text:
+                fulltext = re.sub(r"\s+", " ", r.text.text)[:RECALL_FULL_TEXT_CHARS]
+        counter = Counter(_tokens(f"{title} {title} {summary} {keywords} {fulltext}"))
         docs.append((r.id, counter))
     return docs
 
@@ -145,7 +153,7 @@ def _ref_map(refs: list) -> dict[int, object]:
     return {r.id: r for r in refs}
 
 
-def _chunk_context(pair: dict, refs_by_id: dict[int, object], title_only: bool = False) -> str:
+def _chunk_context(pair: dict, refs_by_id: dict[int, object], title_only: bool = False, deep: bool = True) -> str:
     a, b = refs_by_id.get(pair["a"]), refs_by_id.get(pair["b"])
     if not a or not b:
         return ""
@@ -154,8 +162,17 @@ def _chunk_context(pair: dict, refs_by_id: dict[int, object], title_only: bool =
 
     def _desc(r) -> str:
         abstract = (r.text.summary if r.text and r.text.summary else "").strip()
-        abstract = abstract[:400] if abstract else "（无摘要）"
-        return f"[{r.id}] 标题：{r.title}\n作者：{'、'.join((r.authors or [])[:3])}\n年份：{r.year or '未知'}\n期刊：{r.venue or '未知'}\n摘要：{abstract}"
+        if deep and r.text and r.text.text:
+            full = re.sub(r"\s+", " ", r.text.text).strip()
+            if full:
+                return (f"[{r.id}] 标题：{r.title}\n作者：{'、'.join((r.authors or [])[:3])}\n"
+                        f"年份：{r.year or '未知'}\n期刊：{r.venue or '未知'}\n"
+                        f"摘要：{abstract[:400]}\n全文片段：{full[:DEEP_FULL_TEXT_CHARS]}")
+        if abstract:
+            return (f"[{r.id}] 标题：{r.title}\n作者：{'、'.join((r.authors or [])[:3])}\n"
+                    f"年份：{r.year or '未知'}\n期刊：{r.venue or '未知'}\n摘要：{abstract[:400]}")
+        return (f"[{r.id}] 标题：{r.title}\n作者：{'、'.join((r.authors or [])[:3])}\n"
+                f"年份：{r.year or '未知'}\n期刊：{r.venue or '未知'}\n摘要/全文：（无）")
 
     return f"### 文献 {pair['a']}\n{_desc(a)}\n\n### 文献 {pair['b']}\n{_desc(b)}"
 
@@ -176,15 +193,19 @@ def _parse_json_array(text: str) -> Optional[list[dict]]:
         return None
 
 
-def _llm_score_batch(db, batch: list[dict], refs_by_id: dict[int, object]) -> list[dict]:
-    """一批候选对交给 LLM 评分；失败/未配置返回空列表（由调用方降级）。"""
-    lines = "\n\n".join(_chunk_context(p, refs_by_id) for p in batch)
+def _llm_score_batch(db, batch: list[dict], refs_by_id: dict[int, object], deep: bool = True) -> Optional[list[dict]]:
+    """一批候选对交给 LLM 深度评分（基于摘要+全文内容）。
+
+    调用失败 / 返回无法解析时返回 None，由调用方降级为本地近似**并记录 warning**。
+    """
+    lines = "\n\n".join(_chunk_context(p, refs_by_id, deep=deep) for p in batch)
     pairs = ", ".join(f'{{"a": {p["a"]}, "b": {p["b"]}}}' for p in batch)
     system = (
-        "你是文献计量学专家。请评估以下每对文献的语义关联强度："
-        "同一主题/方法/数据/结论互补/引用依赖等都算关联。"
+        "你是文献计量学专家。请基于每篇文献的标题、作者、期刊和**摘要/全文内容**，"
+        "深入分析两篇论文在方法、数据、结论、理论上的真实关联（同一主题/方法/数据/结论互补/引用依赖等），"
+        "而不是仅凭标签或领域关键词做表面对比。"
         "只输出一个 JSON 数组（不要任何其他文字），每个元素格式："
-        '{"a": 文献ID, "b": 文献ID, "weight": 0到100的整数, "reason": "一句话中文理由（20字内）", "tags": ["标签"]}。'
+        '{"a": 文献ID, "b": 文献ID, "weight": 0到100的整数, "reason": "一句话中文理由（20字内，基于内容分析）", "tags": ["标签"]}。'
         "标签只能从以下选择：方法相似、结论互补、同领域、同技术路线、理论支撑、引用依赖。"
     )
     user = (
@@ -192,13 +213,13 @@ def _llm_score_batch(db, batch: list[dict], refs_by_id: dict[int, object]) -> li
         f"{lines}\n\n输出 JSON 数组，元素按文献 ID 对应对应上面给出的 a/b 顺序。"
     )
     try:
-        # 单批 60s 超时：LLM 慢/不可用时快速降级，避免整个请求长时间挂起
-        raw = llm_service.chat(db, system, [{"role": "user", "content": user}], max_tokens=3000, timeout=60, task="link")
+        # 深度评分：单批 90s 超时，超时/网络失败降级并在上层记录 warning
+        raw = llm_service.chat(db, system, [{"role": "user", "content": user}], max_tokens=4000, timeout=90, task="link")
     except Exception:
-        return []
+        return None
     data = _parse_json_array(raw)
     if data is None:
-        return []
+        return None
     results = []
     for item in data:
         if not isinstance(item, dict) or "a" not in item or "b" not in item:
@@ -216,32 +237,83 @@ def _llm_score_batch(db, batch: list[dict], refs_by_id: dict[int, object]) -> li
     return results
 
 
-def run_auto_link(db) -> dict:
-    """执行完整 AI 自动关联流程，整体覆盖旧结果。返回统计信息。"""
+def _extract_missing_texts(db, refs: list, max_papers: int = EXTRACT_PDF_LIMIT) -> int:
+    """深度评分前：对有 PDF 附件但未提取文本的文献自动提取全文（供 LLM 内容分析）。
+
+    返回实际提取篇数；单篇失败静默跳过，不中断主流程。
+    """
+    from . import pdfextract, storage as storage_service
+
+    done = 0
+    for r in refs:
+        if done >= max_papers:
+            break
+        if not r.stored_path:
+            continue
+        if r.text and r.text.text:
+            continue
+        path = storage_service.storage.abs_path(r.stored_path)
+        if not path.exists():
+            continue
+        try:
+            text = pdfextract.extract_pdf_text(path)
+            if not text:
+                continue
+            info = pdfextract.make_summary(text)
+            rt = db.query(models.ReferenceText).filter_by(reference_id=r.id).first()
+            if rt is None:
+                rt = models.ReferenceText(reference_id=r.id)
+                db.add(rt)
+            rt.text = text
+            if not rt.summary:
+                rt.summary = info.get("summary", "")
+            if not rt.keywords:
+                rt.keywords = info.get("keywords", "")
+            done += 1
+        except Exception:
+            continue
+    if done:
+        db.commit()
+    return done
+
+
+def run_auto_link(db, deep: bool = True) -> dict:
+    """执行完整 AI 自动关联流程，整体覆盖旧结果。返回统计信息与 warnings（降级提示）。"""
     refs = db.query(models.Reference).all()
     if len(refs) < 2:
-        return {"created": 0, "method": "local", "llm_calls": 0, "pairs": 0, "skipped": 0}
+        return {"created": 0, "method": "local", "llm_calls": 0, "pairs": 0, "skipped": 0, "warnings": []}
+
+    # 深度评分前自动提取缺全文的文献（保证 LLM 有论文内容可分析，而不只是标签/摘要）
+    if deep:
+        _extract_missing_texts(db, refs)
 
     pairs = _candidate_pairs(refs)
     refs_by_id = _ref_map(refs)
     llm_configured = llm_service.is_configured(db)
+    warnings: list[str] = []
 
     scored: list[dict] = []
     llm_calls = 0
+    failed_batches = 0
+    batch_size = BATCH_SIZE_DEEP if deep else BATCH_SIZE
     if llm_configured:
-        for i in range(0, len(pairs), BATCH_SIZE):
-            batch = pairs[i:i + BATCH_SIZE]
+        for i in range(0, len(pairs), batch_size):
+            batch = pairs[i:i + batch_size]
             llm_calls += 1
-            results = _llm_score_batch(db, batch, refs_by_id)
-            if results:
+            results = _llm_score_batch(db, batch, refs_by_id, deep=deep)
+            if results is not None:
                 by_key = {(r["a"], r["b"]): r for r in results}
                 for p in batch:
                     hit = by_key.get((p["a"], p["b"])) or by_key.get((p["b"], p["a"]))
                     scored.append(hit if hit else _local_score(p))
             else:
+                failed_batches += 1
                 scored += [_local_score(p) for p in batch]
+        if failed_batches:
+            warnings.append(f"LLM 评分失败 {failed_batches} 批（网络/API Key 问题），这批关联已降级为本地特征近似，请检查配置后重试")
     else:
         scored = [_local_score(p) for p in pairs]
+        warnings.append("未配置 LLM：本次关联基于本地特征近似（标签/文本相似度）。配置 LLM API 后重新运行，可获得基于论文摘要/全文内容的深度语义关联")
 
     # 整体覆盖旧结果（过滤 LLM 判定为 0 的「无关」对，避免噪音）
     db.query(models.ReferenceAiLink).delete()
@@ -259,16 +331,20 @@ def run_auto_link(db) -> dict:
 
     return {
         "created": kept,
-        "method": "llm" if llm_configured else "local",
+        "method": "llm" if (llm_configured and llm_calls > failed_batches) else "local",
         "llm_calls": llm_calls,
         "pairs": len(pairs),
         "struct_pairs": sum(1 for p in pairs if p.get("struct_factors")),
         "skipped": len(scored) - kept,
+        "warnings": warnings,
     }
 
 
 def _local_score(pair: dict) -> dict:
-    """LLM 不可用时的本地降级评分（文本相似 / 结构化特征双口径）。"""
+    """LLM 不可用时的本地降级评分（文本相似 / 结构化特征双口径）。
+
+    reason 带「本地近似」前缀，与 LLM 深度评分结果明确区分。
+    """
     text_weight = pair.get("sim", 0.0) * 80
     struct_weight = pair.get("struct_score", 0.0) * 12
     weight = min(LOCAL_CAP, round(max(text_weight, struct_weight)))
@@ -276,10 +352,10 @@ def _local_score(pair: dict) -> dict:
         factor_names = {
             "tags": "共享标签", "authors": "共享作者", "venue": "同期刊/会议", "year": "年份相近",
         }
-        reason = "、".join(factor_names.get(f, f) for f in pair["struct_factors"])
+        reason = "本地近似：" + "、".join(factor_names.get(f, f) for f in pair["struct_factors"])
         tags = ["特征关联"]
     else:
-        reason = f"标题/摘要文本相似度 {pair['sim']:.2f}"
+        reason = f"本地近似：标题/摘要文本相似度 {pair['sim']:.2f}"
         tags = ["文本相似"]
     return {
         "a": pair["a"], "b": pair["b"],

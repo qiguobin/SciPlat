@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-APP_VERSION = "0.6.2"
+APP_VERSION = "0.7.0"
 APP_NAME = "SciPlat"
 
 if getattr(sys, "frozen", False):
@@ -17,6 +17,15 @@ else:
 DATA_DIR = Path(os.environ.get("SCI_DATA_DIR", str(BASE_DIR / "data")))
 DB_PATH = DATA_DIR / "sci.db"
 FILES_DIR = DATA_DIR / "files"
+
+
+def set_data_dir(path) -> Path:
+    """切换数据目录（工作区）。所有动态读取 config.DATA_DIR/DB_PATH/FILES_DIR 的模块自动跟随。"""
+    global DATA_DIR, DB_PATH, FILES_DIR
+    DATA_DIR = Path(path).expanduser().resolve()
+    DB_PATH = DATA_DIR / "sci.db"
+    FILES_DIR = DATA_DIR / "files"
+    return DATA_DIR
 
 # 前端构建产物：源码树 / _MEIPASS / exe 同级 三处兜底
 FRONTEND_DIST = Path(os.environ.get("SCI_FRONTEND_DIST", "")) if os.environ.get("SCI_FRONTEND_DIST") else None

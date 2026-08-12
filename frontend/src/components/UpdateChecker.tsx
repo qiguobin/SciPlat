@@ -61,13 +61,13 @@ export default function UpdateChecker({ open, onClose }: { open: boolean; onClos
       if (info.download_url) window.open(info.download_url, '_blank')
       return
     }
-    const py = (window as unknown as { pywebview: { api: { download: Function; install: Function } } }).pywebview.api
+    const py = (window as unknown as { pywebview: { api: { update: { download: Function; install: Function } } } }).pywebview.api
     setPhase('downloading'); setProgress(0); setError('')
     ;(window as unknown as { __updateProgress?: (p: number) => void }).__updateProgress = (pct: number) => {
       setProgress(Math.round(pct))
       if (pct >= 100) setPhase('verifying')
     }
-    py.download(info.download_url, info.sha256)
+    py.update.download(info.download_url, info.sha256)
       .then((res: { ok: boolean; path?: string; error?: string }) => {
         if (!res.ok) {
           setPhase('error')
@@ -76,7 +76,7 @@ export default function UpdateChecker({ open, onClose }: { open: boolean; onClos
         }
         setPhase('installing')
         // 主进程将启动静默安装器并退出当前应用，随后自动拉起新版
-        py.install(res.path)
+        py.update.install(res.path)
         setPhase('installing')
       })
       .catch((e: unknown) => { setPhase('error'); setError(String(e)) })

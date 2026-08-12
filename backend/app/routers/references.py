@@ -279,11 +279,14 @@ def semantic_search(body: dict, db: Session = Depends(get_db)):
 # ---------- AI 自动关联（本地 TF-IDF 预筛 + LLM 批量评分，整体覆盖） ----------
 @router.post("/ai-auto-link")
 def ai_auto_link(db: Session = Depends(get_db)):
-    """一键执行 AI 自动关联：文本相似 + 结构化特征双路候选 → LLM 批量评分 → 持久化覆盖旧结果。"""
+    """一键执行 AI 自动关联：文本相似 + 结构化特征双路候选 → LLM 深度评分（基于摘要+全文）→ 持久化覆盖旧结果。
+
+    未配置 LLM / LLM 评分失败时降级为本地近似，并通过 warnings 明确告知。
+    """
     from ..services import ai_link, llm as llm_service
 
     with llm_service.ai_task():
-        stats = ai_link.run_auto_link(db)
+        stats = ai_link.run_auto_link(db, deep=True)
     if stats["created"] == 0:
         return {
             **stats,
@@ -296,7 +299,7 @@ def ai_auto_link(db: Session = Depends(get_db)):
         **stats,
         "message": (
             f"已生成 {stats['created']} 条 AI 关联"
-            + (f"（LLM 语义评分，共 {stats['llm_calls']} 次调用）" if stats["method"] == "llm" else "（本地特征相似度，未配置 LLM）")
+            + (f"（LLM 深度语义评分，共 {stats['llm_calls']} 次调用）" if stats["method"] == "llm" else "（本地特征近似，未配置 LLM）")
             + (f"，其中 {stats['struct_pairs']} 对来自标签/作者等特征" if stats.get("struct_pairs") else "")
         ),
     }
@@ -335,9 +338,47 @@ def delete_ai_link(link_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-# ---------- AI 自动匹配文献信息（CrossRef 结构化补全 + LLM 语义推断，只填空缺） ----------
+# ---------- AI 自动匹配文献信息（多来源检索 + LLM 语义推断，只填空缺） ----------
+def _title_source_match(db: Session, ref: models.Reference, rt) -> tuple[list[str], str, object]:
+    """无 DOI 文献：按标题从 PubMed（英文）/ OpenAlex（中英文）/ CrossRef（兜底）检索补全。
+
+    每来源取相似度最高且 ≥0.6 的候选 merge；外部 API 失败静默跳过，不中断流水线。
+    """
+    from ..services import metadata, pubmed
+
+    title = (ref.title or "").strip()
+    if not title:
+        return [], "none", rt
+    has_cjk = any("\u4e00" <= ch <= "\u9fff" for ch in title)
+    filled: list[str] = []
+    source = "none"
+
+    if not has_cjk:  # 中文标题跳过 PubMed（PubMed 主要为英文文献）
+        try:
+            hit = pubmed.search_pubmed_single(title)
+            if hit and metadata.title_similarity(hit.get("title", ""), title) >= 0.6:
+                step, rt = metadata.merge_metadata(ref, rt, hit)
+                filled += step
+                source = "pubmed"
+        except Exception:
+            pass
+
+    for fetch in (metadata.fetch_openalex, metadata.fetch_crossref_search):  # OpenAlex 中英文 → CrossRef 兜底
+        try:
+            hits = fetch(title, limit=3) or []
+        except Exception:
+            continue
+        best = max(hits, key=lambda h: metadata.title_similarity(h.get("title", ""), title), default=None)
+        if best and metadata.title_similarity(best.get("title", ""), title) >= 0.6:
+            step, rt = metadata.merge_metadata(ref, rt, best)
+            filled += step
+            if source == "none":
+                source = "openalex" if fetch is metadata.fetch_openalex else "crossref"
+    return filled, source, rt
+
+
 def _ai_metadata_for(db: Session, ref: models.Reference) -> dict:
-    """单篇补全流水线：自动提取 PDF 文本 → CrossRef → LLM 推断 → 写回。"""
+    """单篇补全流水线：自动提取 PDF 文本 → CrossRef（有 DOI）/ 标题多来源检索（无 DOI）→ LLM 推断 → 写回。"""
     from ..services import metadata, pdfextract, storage as storage_service
 
     # 1) 有 PDF 未提取 → 自动提取文本（供 LLM 上下文）
@@ -368,6 +409,13 @@ def _ai_metadata_for(db: Session, ref: models.Reference) -> dict:
             step_filled, rt = metadata.merge_metadata(ref, rt, crossref_data)
             filled += step_filled
             source = "crossref"
+
+    # 2.5) 无 DOI → 标题多来源检索（PubMed / OpenAlex / CrossRef）
+    if not ref.doi:
+        step_filled, s, rt = _title_source_match(db, ref, rt)
+        filled += step_filled
+        if s != "none":
+            source = s if source == "none" else "mixed"
 
     # 3) LLM 语义推断（含分区/影响因子；未配置 LLM 时跳过）
     text_ctx = ""
@@ -560,14 +608,40 @@ async def import_bib(file: UploadFile, db: Session = Depends(get_db)):
     return {"imported": created, "skipped": skipped, "total": len(entries)}
 
 
-# ---------- DOI ----------
+# ---------- DOI / 多来源匹配 ----------
 @router.post("/doi-metadata")
 def doi_metadata(body: schemas.DoiRequest):
-    """从 CrossRef 抓取 DOI 元数据；网络不可用或未找到时返回 404，前端降级为手动填写。"""
+    """DOI 元数据：先 CrossRef，未命中自动回退 PubMed（按 DOI 精确检索）。响应含 source 字段。"""
     meta = doi.fetch_doi_metadata(body.doi)
+    source = "crossref"
+    if not meta or not meta.get("title"):
+        from ..services import pubmed
+        meta = pubmed.search_pubmed_single(body.doi)
+        source = "pubmed"
     if not meta or not meta.get("title"):
         raise HTTPException(404, "未能获取该 DOI 的元数据（请检查网络或 DOI 是否正确）")
+    meta["source"] = source
     return meta
+
+
+@router.post("/match-candidates")
+def match_candidates(body: dict):
+    """多来源候选检索（PubMed / OpenAlex(中文) / CrossRef），供前端选择回填。
+
+    body: {q: 标题或DOI, source: auto|pubmed|openalex|crossref}
+    """
+    from ..services import metadata
+
+    q = (body.get("q") or "").strip()
+    if not q:
+        raise HTTPException(400, "请输入标题或 DOI")
+    source = body.get("source") or "auto"
+    if source not in ("auto", "pubmed", "openalex", "crossref"):
+        source = "auto"
+    candidates = metadata.match_candidates(q, source)
+    if not candidates:
+        raise HTTPException(404, "未找到匹配的文献，请尝试其他来源或关键词")
+    return {"candidates": candidates}
 
 
 # ---------- 阅读队列 / RIS 导入 / PDF 批注 ----------

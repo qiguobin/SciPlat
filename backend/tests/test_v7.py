@@ -104,12 +104,12 @@ def test_ai_auto_link_struct_candidates():
 
     links = client.get("/api/references/ai-links").json()
     assert len(links) == 1
-    assert links[0]["reason"] == "共享标签"
+    assert links[0]["reason"] == "本地近似：共享标签"  # 降级结果带「本地近似」前缀，与 LLM 深度评分区分
     assert links[0]["weight"] > 0
 
 
 def test_ai_auto_link_llm_failure_fallback():
-    """LLM 批量评分抛异常时整批降级为本地权重，仍生成关联。"""
+    """LLM 批量评分抛异常时整批降级为本地权重：method 如实报 local + warnings 明确告知，不静默伪装。"""
     from unittest.mock import patch
 
     a = client.post("/api/references", json={"title": "Fallback Alpha Study", "tags": "共同主题"}).json()
@@ -120,7 +120,8 @@ def test_ai_auto_link_llm_failure_fallback():
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["created"] >= 1
-    assert body["method"] == "llm"  # 入口判定基于配置，但降级链路保底
+    assert body["method"] == "local"  # 全部评分失败 → 如实标注本地近似
+    assert any("评分失败" in w for w in body["warnings"])  # 降级明确提示
     links = client.get("/api/references/ai-links").json()
     assert len(links) >= 1
     assert links[0]["method"] == "local"  # 实际由本地特征评分兜底
@@ -187,7 +188,10 @@ def test_ai_metadata_merge_only_missing():
     fake = {"venue": "LLM 推断期刊（不应覆盖）", "year": 2025, "keywords": "测试关键词", "cas_quartile": "2区"}
     with patch("app.services.llm.is_configured", return_value=True), \
          patch("app.services.metadata.infer_metadata_llm", return_value=fake), \
-         patch("app.services.metadata.fetch_crossref", return_value={}):
+         patch("app.services.metadata.fetch_crossref", return_value={}), \
+         patch("app.services.pubmed.search_pubmed_single", return_value=None), \
+         patch("app.services.metadata.fetch_openalex", return_value=[]), \
+         patch("app.services.metadata.fetch_crossref_search", return_value=[]):
         r = client.post(f"/api/references/{rid}/ai-metadata")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -206,7 +210,10 @@ def test_ai_metadata_merge_only_missing():
     # 全部字段已补全 → 再跑无新字段 → 400
     with patch("app.services.llm.is_configured", return_value=True), \
          patch("app.services.metadata.infer_metadata_llm", return_value=fake), \
-         patch("app.services.metadata.fetch_crossref", return_value={}):
+         patch("app.services.metadata.fetch_crossref", return_value={}), \
+         patch("app.services.pubmed.search_pubmed_single", return_value=None), \
+         patch("app.services.metadata.fetch_openalex", return_value=[]), \
+         patch("app.services.metadata.fetch_crossref_search", return_value=[]):
         r = client.post(f"/api/references/{rid}/ai-metadata")
     assert r.status_code == 400
 
@@ -246,7 +253,10 @@ def test_ai_match_batch_incomplete_only():
     fake = {"year": 2024, "venue": "Filled Venue"}
     with patch("app.services.llm.is_configured", return_value=True), \
          patch("app.services.metadata.infer_metadata_llm", return_value=fake), \
-         patch("app.services.metadata.fetch_crossref", return_value={}):
+         patch("app.services.metadata.fetch_crossref", return_value={}), \
+         patch("app.services.pubmed.search_pubmed_single", return_value=None), \
+         patch("app.services.metadata.fetch_openalex", return_value=[]), \
+         patch("app.services.metadata.fetch_crossref_search", return_value=[]):
         r = client.post("/api/references/ai-match", json={"limit": 10, "only_incomplete": True})
     assert r.status_code == 200, r.text
     body = r.json()

@@ -22,6 +22,35 @@ def _pragmas(dbapi_conn, _record):
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
+# 引擎代际计数：切换工作区（rebind）后递增，供后台线程检测引擎已更换
+_engine_gen = 0
+
+
+def rebind() -> None:
+    """切换数据目录（工作区）后重建引擎/SessionLocal，并完成完整初始化（建表/迁移/FTS）。
+
+    所有函数内 `from .database import SessionLocal` 的引用点（get_db、_log_system_event、
+    tracker 线程等）会在下次执行 import 语句时自动拿到新实例。
+    """
+    global engine, SessionLocal, _engine_gen
+    try:
+        engine.dispose()  # 释放旧库连接（WAL 落盘）
+    except Exception:
+        pass
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(
+        f"sqlite:///{config.DB_PATH}",
+        connect_args={"check_same_thread": False},
+    )
+    event.listen(engine, "connect", _pragmas)  # 重新注册 pragma 监听（事件绑定旧 engine 对象）
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    _engine_gen += 1
+    init_db()
+    try:
+        rebuild_fts()
+    except Exception:
+        pass
+
 
 class Base(DeclarativeBase):
     pass

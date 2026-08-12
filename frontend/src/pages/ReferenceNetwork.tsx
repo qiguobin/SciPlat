@@ -46,6 +46,7 @@ export default function ReferenceNetwork() {
   const [aiRunning, setAiRunning] = useState(false)
   const [aiManageOpen, setAiManageOpen] = useState(false)
   const [aiLinks, setAiLinks] = useState<AiLinkRow[]>([])
+  const [linkLocalWarn, setLinkLocalWarn] = useState<string | null>(null)
   const bump = useAppStore((s) => s.bump)
 
   const load = useCallback(() => {
@@ -119,17 +120,21 @@ export default function ReferenceNetwork() {
 
   const runAutoLink = () => {
     setAiRunning(true)
-    // 120s 客户端超时兜底：LLM 慢时避免无限等待（后端单批 60s 超时，超时自动降级本地特征）
-    api.post('/references/ai-auto-link', {}, { timeout: 120000 })
+    // 150s 客户端超时兜底：深度评分配置 LLM 时单批 90s，慢时避免无限等待
+    api.post('/references/ai-auto-link', {}, { timeout: 150000 })
       .then((r) => {
+        const warnings: string[] = r.data.warnings ?? []
         if (r.data.created === 0) {
           message.warning(r.data.message ?? '未生成关联')
         } else {
           message.success(r.data.message)
         }
+        // 未配置 LLM / LLM 评分降级 → 明确告知，不静默伪装成「AI 关联」
+        setLinkLocalWarn(warnings[0] ?? null)
+        warnings.forEach((w) => message.warning(w))
         bump()
       })
-      .catch((e) => message.error(e.response?.data?.detail ?? 'AI 自动关联失败（可重试，未配置 LLM 时使用本地特征相似度）'))
+      .catch((e) => message.error(e.response?.data?.detail ?? 'AI 自动关联失败（可重试）'))
       .finally(() => setAiRunning(false))
   }
 
@@ -164,6 +169,16 @@ export default function ReferenceNetwork() {
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      {linkLocalWarn && (
+        <Alert
+          type="warning"
+          showIcon
+          message="当前 AI 关联基于本地特征近似"
+          description={linkLocalWarn + '。在 ⚙️ 设置中配置 LLM API 后重新运行，可获得基于论文摘要/全文内容的深度语义关联。'}
+          closable
+          onClose={() => setLinkLocalWarn(null)}
+        />
+      )}
       {/* 工具栏 */}
       <Card size="small">
         <Space wrap>
@@ -192,7 +207,7 @@ export default function ReferenceNetwork() {
           </Popconfirm>
           <Popconfirm
             title="运行 AI 自动关联？"
-            description="本地相似度预筛候选对后，由 LLM 批量评分（未配置 LLM 时自动用本地文本相似度）。重新生成会覆盖旧结果。"
+            description="本地相似度召回候选对后，由 LLM 基于每篇文献的摘要/全文内容深度评分（未配置 LLM 时会明确提示并降级为本地近似）。重新生成会覆盖旧结果。"
             onConfirm={runAutoLink}
           >
             <Button type="primary" icon={<RobotOutlined />} loading={aiRunning}>

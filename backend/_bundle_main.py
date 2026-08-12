@@ -159,6 +159,23 @@ class UpdateApi:
             pass
 
 
+class WorkspaceApi:
+    """pywebview js_api：工作区相关桌面能力（系统目录选择器）。"""
+
+    def pick_directory(self) -> list[str] | None:
+        """弹出系统文件夹选择对话框，返回选中路径列表（取消返回 None）。"""
+        global _WINDOW
+        try:
+            if _WINDOW is None:
+                return None
+            result = _WINDOW.create_file_dialog(webview.FOLDER_DIALOG)
+            if isinstance(result, str):
+                return [result]
+            return list(result or [])
+        except Exception:  # noqa: BLE001
+            return None
+
+
 if __name__ == "__main__":
     threading.Thread(target=_run_server, daemon=True).start()
     if not _wait_ready():
@@ -172,6 +189,9 @@ if __name__ == "__main__":
     if os.path.exists(ico):
         icon = ico
     update_api = UpdateApi()
+    workspace_api = WorkspaceApi()
+    # js_api 使用 dict：前端通过 pywebview.api.update.* / pywebview.api.workspace.* 调用
+    _js_api = {"update": update_api, "workspace": workspace_api}
     try:
         _win = webview.create_window(
             "SciPlat 博士生科研管理平台",
@@ -181,7 +201,7 @@ if __name__ == "__main__":
             min_size=(1024, 640),
             icon=icon,
             background_color="#0B1120",
-            js_api=update_api,
+            js_api=_js_api,
         )
     except TypeError:
         # 旧版 pywebview 无 icon/js_api 参数时降级
@@ -192,7 +212,7 @@ if __name__ == "__main__":
             height=900,
             min_size=(1024, 640),
             background_color="#0B1120",
-            js_api=update_api,
+            js_api=_js_api,
         )
     # 窗口引用存入模块级变量（实例属性会造成循环引用卡死）
     _WINDOW = _win

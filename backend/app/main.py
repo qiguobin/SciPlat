@@ -29,10 +29,32 @@ from .routers import (
     tracking,
     update as update_router,
     v5,
+    workspace,
     writing,
 )
 
 _UPTIME_START = time.time()
+_WORKSPACE_LOCK = threading.Lock()
+
+
+def switch_workspace(path: str) -> str:
+    """切换工作区（数据目录）：重建引擎/存储 → 建表/迁移/FTS → key 加密迁移 → 自动备份节流。
+
+    调用方（routers/workspace.py）延迟 import 本函数以避免循环依赖。
+    """
+    with _WORKSPACE_LOCK:
+        from .database import rebind as rebind_db
+        from .services import storage as storage_service
+
+        config.set_data_dir(path)
+        rebind_db()                      # 重建 engine/SessionLocal + init_db + rebuild_fts
+        _migrate_api_key_encryption()    # 新库明文 key 加密迁移（幂等）
+        try:
+            backup._auto_backup()        # 新库自动备份（距上次 >7 天）
+        except Exception:
+            pass
+        storage_service.rebind()         # 文件存储指向新 FILES_DIR
+    return str(config.DATA_DIR)
 
 
 def _log_system_event(level: str, source: str, message: str) -> None:
@@ -67,19 +89,26 @@ async def _record_exceptions(request: Request, call_next):
 
 
 def _tracker_loop() -> None:
-    """后台线程：每 6 小时抓取活跃订阅源（新条目自动写系统通知）。"""
+    """后台线程：每 6 小时抓取活跃订阅源（新条目自动写系统通知）。
+
+    引擎代际（_engine_gen）变化说明切换了工作区：跳过当轮，下一轮自动用新库。
+    """
     import time as _time
 
-    from .database import SessionLocal
+    from . import database as _db
 
+    last_gen = None
     while True:
         _time.sleep(tracking.FETCH_INTERVAL_HOURS * 3600)
         try:
-            db = SessionLocal()
-            try:
-                tracking.auto_fetch_all(db)
-            finally:
-                db.close()
+            if _db._engine_gen == last_gen:
+                db = _db.SessionLocal()
+                try:
+                    tracking.auto_fetch_all(db)
+                finally:
+                    db.close()
+            else:
+                last_gen = _db._engine_gen  # 引擎已切换：本轮跳过，下轮用新库
         except Exception:
             pass
 
@@ -155,6 +184,7 @@ for router in (
     tracking.router,
     ai_router.router,
     update_router.router,
+    workspace.router,
 ):
     app.include_router(router)
 

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Alert, Button, Card, Dropdown, Empty, Form, Input, List, message, Modal, Popconfirm, Progress, Select, Slider, Space, Spin, Table, Tabs, Tag, Typography, Upload,
+  Alert, Button, Card, Dropdown, Empty, Form, Input, List, message, Modal, Popconfirm, Progress, Radio, Select, Slider, Space, Spin, Table, Tabs, Tag, Typography, Upload,
 } from 'antd'
 import {
   CloudDownloadOutlined, CopyOutlined, DeleteOutlined, DownOutlined, DownloadOutlined, EditOutlined, ExperimentOutlined,
   FileSearchOutlined, FileTextOutlined, ImportOutlined, LinkOutlined, PlusOutlined, ApartmentOutlined,
-  ReadOutlined, RobotOutlined, SaveOutlined, ScissorOutlined,
+  ReadOutlined, RobotOutlined, SaveOutlined, ScissorOutlined, SearchOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
@@ -32,6 +32,31 @@ const LEVEL_TOOLS = [
 
 const READ_OPTIONS = Object.keys(READ_STATUS)
 
+// 多来源匹配：来源 → 显示名/颜色
+const MATCH_SOURCES: Record<string, { label: string; color: string }> = {
+  pubmed: { label: 'PubMed', color: 'blue' },
+  openalex: { label: 'OpenAlex', color: 'green' },
+  crossref: { label: 'CrossRef', color: 'orange' },
+}
+
+const srcLabel = (s: string): string =>
+  s === 'llm' ? 'LLM 推断'
+    : s === 'pubmed' ? 'PubMed'
+    : s === 'openalex' ? 'OpenAlex'
+    : s === 'crossref' ? 'CrossRef'
+    : '混合'
+
+interface MatchCandidate {
+  source: 'pubmed' | 'openalex' | 'crossref'
+  title: string
+  authors: string[]
+  year: number | null
+  venue: string
+  doi: string
+  pmid?: string
+  language?: string
+}
+
 export default function References() {
   const nav = useNavigate()
   const { sub = 'list' } = useParams()
@@ -46,6 +71,12 @@ export default function References() {
   const [editing, setEditing] = useState<Reference | null>(null)
   const [form] = Form.useForm()
   const [doiLoading, setDoiLoading] = useState(false)
+  const [matchOpen, setMatchOpen] = useState(false)
+  const [matchSource, setMatchSource] = useState('auto')
+  const [matchQuery, setMatchQuery] = useState('')
+  const [matchLoading, setMatchLoading] = useState(false)
+  const [matchCandidates, setMatchCandidates] = useState<MatchCandidate[]>([])
+  const [matchSelected, setMatchSelected] = useState<MatchCandidate | null>(null)
   const [noteTarget, setNoteTarget] = useState<Reference | null>(null)
   const [importLoading, setImportLoading] = useState(false)
   const [reader, setReader] = useState<Reference | null>(null)
@@ -298,19 +329,61 @@ ${aiModal.content}`,
           year: m.year ?? form.getFieldValue('year'),
           venue: m.venue || form.getFieldValue('venue'),
         })
-        message.success('已从 CrossRef 获取元数据')
+        message.success(`已从 ${r.data.source === 'pubmed' ? 'PubMed' : 'CrossRef'} 获取元数据`)
       })
       .catch((e) => message.error(e.response?.data?.detail ?? '获取失败'))
       .finally(() => setDoiLoading(false))
   }
 
-  /** AI 自动匹配单篇文献信息（CrossRef + LLM 推断，只填空缺字段） */
+  /** 打开「从标题匹配」弹窗（预填当前表单标题） */
+  const openMatch = () => {
+    setMatchQuery(form.getFieldValue('title') || '')
+    setMatchCandidates([])
+    setMatchSelected(null)
+    setMatchOpen(true)
+  }
+
+  /** 多来源候选检索（PubMed / OpenAlex 中文 / CrossRef） */
+  const searchCandidates = () => {
+    const q = matchQuery.trim() || form.getFieldValue('title') || ''
+    if (!q) {
+      message.warning('请输入标题或 DOI')
+      return
+    }
+    setMatchLoading(true)
+    api.post<{ candidates: MatchCandidate[] }>('/references/match-candidates', { q, source: matchSource })
+      .then((r) => {
+        setMatchCandidates(r.data.candidates)
+        setMatchSelected(null)
+      })
+      .catch((e) => {
+        setMatchCandidates([])
+        message.error(e.response?.data?.detail ?? '检索失败')
+      })
+      .finally(() => setMatchLoading(false))
+  }
+
+  /** 选中候选 → 回填表单（不落库，由用户保存） */
+  const applyCandidate = () => {
+    if (!matchSelected) return
+    const m = matchSelected
+    form.setFieldsValue({
+      title: m.title || form.getFieldValue('title'),
+      authors: m.authors?.length ? m.authors : form.getFieldValue('authors'),
+      year: m.year ?? form.getFieldValue('year'),
+      venue: m.venue || form.getFieldValue('venue'),
+      doi: m.doi || form.getFieldValue('doi'),
+    })
+    message.success(`已回填（${MATCH_SOURCES[m.source]?.label ?? m.source}）`)
+    setMatchOpen(false)
+  }
+
+  /** AI 自动匹配单篇文献信息（多来源检索 + LLM 推断，只填空缺字段） */
   const runAiMetadata = (ref: Reference) => {
     setAiMetaLoading(ref.id)
     api.post<{ filled: string[]; source: string }>(`/references/${ref.id}/ai-metadata`)
       .then((r) => {
-        const src = r.data.source === 'llm' ? 'LLM 推断' : r.data.source === 'crossref' ? 'CrossRef' : '混合'
-        message.success(`已补全 ${r.data.filled.length} 个字段（${src}）`)
+        message.success(`已补全 ${r.data.filled.length} 个字段（${srcLabel(r.data.source)}）`)
         bump()
       })
       .catch((e) => message.error(e.response?.data?.detail ?? '补全失败'))
@@ -345,8 +418,7 @@ ${aiModal.content}`,
     setDoiLoading(true)
     api.post<{ filled: string[]; source: string }>(`/references/${editing.id}/ai-metadata`)
       .then((r) => {
-        const src = r.data.source === 'llm' ? 'LLM 推断' : r.data.source === 'crossref' ? 'CrossRef' : '混合'
-        message.success(`已补全 ${r.data.filled.length} 个字段（${src}）`)
+        message.success(`已补全 ${r.data.filled.length} 个字段（${srcLabel(r.data.source)}）`)
         api.get<Reference>(`/references/${editing.id}`).then((res) => {
           const m = res.data
           form.setFieldsValue({
@@ -465,7 +537,7 @@ ${aiModal.content}`,
                   </Button>
                   <Popconfirm
                     title="AI 批量补全文献信息？"
-                    description="默认处理信息不完整的文献（缺 DOI/期刊/年份/分区之一，最多 20 篇），每篇可能调用一次 LLM。只填空缺字段，不覆盖已有值。"
+                    description="默认处理信息不完整的文献（缺 DOI/期刊/年份/分区之一，最多 20 篇）：自动按标题检索 PubMed / OpenAlex（含中文）/ CrossRef 补全，每篇可能再调用一次 LLM。只填空缺字段，不覆盖已有值。"
                     onConfirm={runAiMatch}
                   >
                     <Button icon={<RobotOutlined />} loading={batchAiLoading}>
@@ -577,11 +649,13 @@ ${aiModal.content}`,
               <Card size="small">
                 <Table<Reference>
                   rowKey="id"
+                  className="refs-table"
                   loading={loading}
                   dataSource={list}
                   virtual
                   scroll={{ x: 1400, y: 620 }}
                   rowSelection={{
+                    columnWidth: 32,
                     selectedRowKeys: selectedRefs.map((r) => r.id),
                     onChange: (_keys, rows) => setSelectedRefs(rows),
                   }}
@@ -799,10 +873,30 @@ ${aiModal.content}`,
           <Space.Compact style={{ width: '100%' }}>
             <Input placeholder="如 10.1038/nature14539" />
             <Button loading={doiLoading} onClick={fetchDoi}>自动获取</Button>
-            <Button loading={doiLoading} onClick={aiMatchInModal} title="CrossRef + LLM 推断补全全部字段（含分区），只填空缺">
-              AI 自动匹配
-            </Button>
           </Space.Compact>
+        </Form.Item>
+        <Form.Item label="智能匹配">
+          <Space wrap>
+            <Select
+              value={matchSource}
+              onChange={setMatchSource}
+              style={{ width: 150 }}
+              options={[
+                { value: 'auto', label: '自动（全部来源）' },
+                { value: 'pubmed', label: 'PubMed' },
+                { value: 'openalex', label: 'OpenAlex（中文）' },
+                { value: 'crossref', label: 'CrossRef' },
+              ]}
+            />
+            <Button icon={<SearchOutlined />} onClick={openMatch}
+              title="按标题从 PubMed / OpenAlex（含中文文献）/ CrossRef 检索，选择候选回填表单">
+              从标题匹配
+            </Button>
+            <Button loading={doiLoading} onClick={aiMatchInModal}
+              title="多来源检索 + LLM 推断补全全部字段（含分区），只填空缺">
+              <RobotOutlined /> AI 自动匹配
+            </Button>
+          </Space>
         </Form.Item>
         <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
           <Input />
@@ -867,6 +961,71 @@ ${aiModal.content}`,
           <Select options={READ_OPTIONS.map((s) => ({ value: s, label: s }))} />
         </Form.Item>
       </Form>
+    </Modal>
+
+    {/* 从标题匹配：多来源候选选择弹窗 */}
+    <Modal
+      title="从标题匹配文献（PubMed / OpenAlex 中文 / CrossRef）"
+      open={matchOpen}
+      onCancel={() => setMatchOpen(false)}
+      onOk={applyCandidate}
+      okText="回填到表单"
+      okButtonProps={{ disabled: !matchSelected }}
+      width={680}
+      destroyOnClose
+    >
+      <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
+        <Input
+          value={matchQuery}
+          onChange={(e) => setMatchQuery(e.target.value)}
+          onPressEnter={searchCandidates}
+          placeholder="标题或 DOI"
+        />
+        <Select
+          value={matchSource}
+          onChange={setMatchSource}
+          style={{ width: 160 }}
+          options={[
+            { value: 'auto', label: '自动' },
+            { value: 'pubmed', label: 'PubMed' },
+            { value: 'openalex', label: 'OpenAlex' },
+            { value: 'crossref', label: 'CrossRef' },
+          ]}
+        />
+        <Button type="primary" icon={<SearchOutlined />} loading={matchLoading} onClick={searchCandidates}>
+          搜索
+        </Button>
+      </Space.Compact>
+      <List
+        dataSource={matchCandidates}
+        loading={matchLoading}
+        locale={{ emptyText: '输入标题或 DOI 后点击搜索' }}
+        renderItem={(c) => {
+          const sel = matchSelected === c
+          return (
+            <List.Item
+              style={{ cursor: 'pointer', paddingInline: 8, background: sel ? '#e6f4ff' : undefined }}
+              onClick={() => setMatchSelected(c)}
+            >
+              <Radio checked={sel} onClick={(e) => e.stopPropagation()} />
+              <div style={{ flex: 1, marginLeft: 8 }}>
+                <Space size={4} wrap>
+                  <Tag color={MATCH_SOURCES[c.source]?.color}>{MATCH_SOURCES[c.source]?.label ?? c.source}</Tag>
+                  {c.language === 'zh' && <Tag color="volcano">中文</Tag>}
+                  {c.year && <Tag>{c.year}</Tag>}
+                </Space>
+                <div style={{ fontWeight: 500 }}>{c.title}</div>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {c.authors.slice(0, 5).join(', ')}{c.authors.length > 5 ? ' 等' : ''}
+                  {c.venue ? ` · ${c.venue}` : ''}
+                  {c.doi ? ` · DOI: ${c.doi}` : ''}
+                  {c.pmid ? ` · PMID: ${c.pmid}` : ''}
+                </Typography.Text>
+              </div>
+            </List.Item>
+          )
+        }}
+      />
     </Modal>
 
     {/* 在线阅读弹窗（含精读与笔记 Tab + 阅读时长计时） */}

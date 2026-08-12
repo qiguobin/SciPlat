@@ -43,3 +43,12 @@ class LocalStorage:
 
 
 storage = LocalStorage(config.FILES_DIR)
+
+
+def rebind() -> None:
+    """切换工作区后重建存储单例（指向新 FILES_DIR）。
+
+    各 router 均通过 `from ..services.storage import storage` 属性访问，自动拿到新实例。
+    """
+    global storage
+    storage = LocalStorage(config.FILES_DIR)

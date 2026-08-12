@@ -872,3 +872,8 @@ button,
     grid-row: auto !important;
   }
 }
+
+/* 文献表勾选列紧凑（References） */
+.refs-table .ant-table-selection-column {
+  padding-inline: 8px !important;
+}

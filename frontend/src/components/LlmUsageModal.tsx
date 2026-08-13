@@ -36,12 +36,8 @@ interface ModelMeta { model: string; context_window: number; input_price_per_m: 
 const fmtTokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n))
 const fmtCost = (n: number) => (n >= 100 ? n.toFixed(0) : n >= 1 ? n.toFixed(2) : n.toFixed(4))
 
-/** LLM 用量详情：统计卡 + 余额（刷新/手动）+ 分模型明细 */
-export default function LlmUsageModal({ open, onClose, onOpenLlm }: {
-  open: boolean
-  onClose: () => void
-  onOpenLlm?: () => void
-}) {
+/** LLM 用量内容（无 Modal 外壳，供「AI 状态」页面与弹窗复用） */
+export function LlmUsageContent() {
   const [usage, setUsage] = useState<UsageData | null>(null)
   const [balance, setBalance] = useState<Balance | null>(null)
   const [models, setModels] = useState<ModelMeta[]>([])
@@ -64,7 +60,7 @@ export default function LlmUsageModal({ open, onClose, onOpenLlm }: {
     }).catch(() => message.error('用量统计加载失败'))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { if (open) load() }, [open])
+  useEffect(() => { load() }, [])
 
   const refreshBalance = () => {
     setRefreshing(true)
@@ -110,12 +106,7 @@ export default function LlmUsageModal({ open, onClose, onOpenLlm }: {
   }, [usage])
 
   return (
-    <Modal title={<span><ReloadOutlined style={{ marginRight: 8 }} />LLM 用量与余额</span>}
-      open={open} onCancel={onClose} width={760}
-      footer={[
-        <Button key="set" icon={<SettingOutlined />} onClick={onOpenLlm}>模型配置（⚙️）</Button>,
-        <Button key="close" type="primary" onClick={onClose}>关闭</Button>,
-      ]}>
+    <Space direction="vertical" style={{ width: '100%' }} size="middle">
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}>加载中…</div>
       ) : (
@@ -198,6 +189,24 @@ export default function LlmUsageModal({ open, onClose, onOpenLlm }: {
           </Card>
         </Space>
       )}
+    </Space>
+  )
+}
+
+/** LLM 用量与余额弹窗（快速入口兼容壳） */
+export default function LlmUsageModal({ open, onClose, onOpenLlm }: {
+  open: boolean
+  onClose: () => void
+  onOpenLlm?: () => void
+}) {
+  return (
+    <Modal title={<span><ReloadOutlined style={{ marginRight: 8 }} />LLM 用量与余额</span>}
+      open={open} onCancel={onClose} width={760}
+      footer={[
+        <Button key="set" icon={<SettingOutlined />} onClick={onOpenLlm}>模型配置（⚙️）</Button>,
+        <Button key="close" type="primary" onClick={onClose}>关闭</Button>,
+      ]}>
+      {open && <LlmUsageContent />}
     </Modal>
   )
 }

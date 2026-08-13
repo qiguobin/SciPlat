@@ -20,6 +20,7 @@ interface Health {
   llm_context_window: number
   llm_balance: { is_available: boolean; total_balance: number; currency: string; note?: string; manual?: boolean } | null
   llm_status: { online: boolean; availability_pct: number | null; latency_ms: number | null; checked_at: string } | null
+  provider_status: { overall: string; description: string; checked_at: string } | null
   llm_usage_today: { total_tokens: number; cost: number; calls: number }
   ai_tasks_running: number
   python: string
@@ -48,11 +49,12 @@ const fmtUptime = (s: number) => {
 }
 
 /** 底部状态栏：服务/数据库/版本/LLM（上下文·余额·用量·子任务）/错误计数 */
-export default function StatusBar({ onOpenData, onOpenLlm, onOpenUpdate, onOpenUsage }: {
+export default function StatusBar({ onOpenData, onOpenLlm, onOpenUpdate, onOpenUsage, onOpenAiStatus }: {
   onOpenData?: () => void
   onOpenLlm?: () => void
   onOpenUpdate?: () => void
   onOpenUsage?: () => void
+  onOpenAiStatus?: () => void
 }) {
   const [health, setHealth] = useState<Health | null>(null)
   const [online, setOnline] = useState(true)
@@ -172,6 +174,14 @@ export default function StatusBar({ onOpenData, onOpenLlm, onOpenUpdate, onOpenU
               )}
             </span>
           </Tooltip>
+
+          {health?.provider_status && health.provider_status.overall !== 'operational' && health.provider_status.overall !== 'unknown' && (
+            <Tooltip title={`${health.provider_status.description || 'Provider 服务异常'}（${health.provider_status.checked_at || '—'}），点击查看 AI 状态`}>
+              <span className="statusbar-item statusbar-click statusbar-error" onClick={onOpenAiStatus}>
+                ⚠️ API 性能下降
+              </span>
+            </Tooltip>
+          )}
 
           <span className={`statusbar-item statusbar-click ${errorCount > 0 ? 'statusbar-error' : ''}`} onClick={openLog}>
             <AlertOutlined />

@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-APP_VERSION = "0.7.2"
+APP_VERSION = "0.7.3"
 APP_NAME = "SciPlat"
 
 if getattr(sys, "frozen", False):

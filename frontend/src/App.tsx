@@ -15,6 +15,7 @@ import Achievements from './pages/Achievements'
 import Canvas from './pages/Canvas'
 import Tracking from './pages/Tracking'
 import Island from './pages/Island'
+import AiStatus from './pages/AiStatus'
 
 export default function App() {
   return (
@@ -39,6 +40,8 @@ export default function App() {
           <Route path="canvas" element={<Canvas />} />
           <Route path="tracking" element={<Tracking />} />
           <Route path="island" element={<Island />} />
+          <Route path="ai-status" element={<Navigate to="/ai-status/overview" replace />} />
+          <Route path="ai-status/:sub" element={<AiStatus />} />
           <Route path="search" element={<Search />} />
           <Route path="*" element={<Dashboard />} />
         </Route>

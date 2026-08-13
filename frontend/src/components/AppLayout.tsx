@@ -15,6 +15,7 @@ import {
   PartitionOutlined,
   ProjectOutlined,
   RadarChartOutlined,
+  RobotOutlined,
   SettingOutlined,
   TrophyOutlined,
 } from '@ant-design/icons'
@@ -23,10 +24,8 @@ import { api } from '../api/client'
 import QuickAdd from './QuickAdd'
 import DataManager from './DataManager'
 import NotificationCenter from './NotificationCenter'
-import LlmSettings from './LlmSettings'
 import StatusBar from './StatusBar'
 import UpdateChecker from './UpdateChecker'
-import LlmUsageModal from './LlmUsageModal'
 import WorkspaceModal from './WorkspaceModal'
 import { useAppStore } from '../store'
 
@@ -89,6 +88,19 @@ const MENU_GROUPS = [
         ] },
     ],
   },
+  {
+    key: 'ai',
+    label: 'AI',
+    type: 'group' as const,
+    children: [
+      { key: '/ai-status', icon: <RobotOutlined />, label: 'AI 状态',
+        children: [
+          { key: '/ai-status/overview', label: '服务状态' },
+          { key: '/ai-status/settings', label: '模型设置' },
+          { key: '/ai-status/usage', label: '用量与余额' },
+        ] },
+    ],
+  },
 ]
 
 const PAGE_TITLES: Record<string, string> = {
@@ -105,6 +117,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/canvas': '科研画布',
   '/tracking': '科研追踪',
   '/search': '全局搜索',
+  '/ai-status': 'AI 状态',
 }
 
 export default function AppLayout() {
@@ -113,16 +126,14 @@ export default function AppLayout() {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState(false)
   const [dataOpen, setDataOpen] = useState(false)
-  const [llmOpen, setLlmOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
-  const [usageOpen, setUsageOpen] = useState(false)
   const [wsOpen, setWsOpen] = useState(false)
   const theme = useAppStore((s) => s.theme)
   const toggleTheme = useAppStore((s) => s.toggleTheme)
   const root = '/' + (loc.pathname.split('/')[1] || '')
   const title = PAGE_TITLES[root] ?? 'SciPlat'
   // 二级菜单：选中当前路径，展开父级
-  const [openKeys, setOpenKeys] = useState<string[]>(['/references', '/schedule', '/achievements'])
+  const [openKeys, setOpenKeys] = useState<string[]>(['/references', '/schedule', '/achievements', '/ai-status'])
 
   // 微距视差：背景光晕跟随鼠标（--mx/--my 驱动，rAF 节流）
   useEffect(() => {
@@ -217,7 +228,7 @@ export default function AppLayout() {
             style={{ maxWidth: 420, marginLeft: 'auto' }}
             allowClear
           />
-          <Button type="text" icon={<SettingOutlined />} title="AI 设置（LLM）" onClick={() => setLlmOpen(true)} />
+          <Button type="text" icon={<SettingOutlined />} title="AI 设置（LLM）" onClick={() => nav('/ai-status/settings')} />
           <NotificationCenter />
           <Button type="text" icon={<FolderOpenOutlined />} title="工作区（独立数据目录）" onClick={() => setWsOpen(true)} />
           <Button type="text" icon={<DatabaseOutlined />} title="数据管理（备份/恢复）" onClick={() => setDataOpen(true)} />
@@ -240,17 +251,16 @@ export default function AppLayout() {
         {/* 底部状态栏：数据库 / 版本 / LLM 用量余额 / 错误监控 / 检查更新 */}
         <StatusBar
           onOpenData={() => setDataOpen(true)}
-          onOpenLlm={() => setLlmOpen(true)}
+          onOpenLlm={() => nav('/ai-status/settings')}
           onOpenUpdate={() => setUpdateOpen(true)}
-          onOpenUsage={() => setUsageOpen(true)}
+          onOpenUsage={() => nav('/ai-status/usage')}
+          onOpenAiStatus={() => nav('/ai-status/overview')}
         />
       </Layout>
 
       <QuickAdd />
-      <LlmSettings open={llmOpen} onClose={() => setLlmOpen(false)} />
       <DataManager open={dataOpen} onClose={() => setDataOpen(false)} />
       <UpdateChecker open={updateOpen} onClose={() => setUpdateOpen(false)} />
-      <LlmUsageModal open={usageOpen} onClose={() => setUsageOpen(false)} onOpenLlm={() => { setUsageOpen(false); setLlmOpen(true) }} />
       <WorkspaceModal open={wsOpen} onClose={() => setWsOpen(false)} />
     </Layout>
   )

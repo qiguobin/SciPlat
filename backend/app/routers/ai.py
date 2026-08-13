@@ -61,6 +61,7 @@ def get_llm_settings(db: Session = Depends(get_db)):
         "output_price_per_m": meta.output_price_per_m if meta else 0,
         "cache_price_per_m": meta.cache_price_per_m if meta else 0,
         "model_route": llm_service.get_model_route(db),
+        "provider_status_url": _setting(db, "llm_provider_status_url"),
     }
 
 
@@ -74,6 +75,7 @@ def update_llm_settings(body: dict, db: Session = Depends(get_db)):
         "llm_api_key": "llm_api_key", "api_key": "llm_api_key",
         "llm_model": "llm_model", "model": "llm_model",
         "llm_ollama_url": "llm_ollama_url", "ollama_url": "llm_ollama_url",
+        "llm_provider_status_url": "llm_provider_status_url", "provider_status_url": "llm_provider_status_url",
     }
     saved = []
     for front_key, storage_key in key_map.items():
@@ -256,6 +258,26 @@ def llm_status_refresh(db: Session = Depends(get_db)):
     from ..services import llm as llm_service
 
     return llm_service.probe_and_record(db)
+
+
+@router.get("/llm/provider-status")
+def llm_provider_status(db: Session = Depends(get_db)):
+    """Provider 状态页（status.deepseek.com 等）：读缓存（10 分钟），零外部请求。"""
+    from ..services import provider_status
+
+    result = provider_status.get_provider_status(db)
+    result["cached"] = True
+    return result
+
+
+@router.post("/llm/provider-status/refresh")
+def llm_provider_status_refresh(db: Session = Depends(get_db)):
+    """实时抓取 Provider 状态页并刷新缓存。"""
+    from ..services import provider_status
+
+    result = provider_status.get_provider_status(db, force=True)
+    result["cached"] = False
+    return result
 
 
 # ================ 文献 AI 解读 + 十问 ================

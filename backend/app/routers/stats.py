@@ -182,6 +182,10 @@ def health(db: Session = Depends(get_db)):
             balance = None
     # LLM API 服务状态（读缓存，零外部请求）
     llm_status = llm_service.get_llm_status(db)
+    # Provider 状态页摘要（读缓存，零外部请求）
+    from ..services import provider_status
+
+    provider_status_summary = provider_status.get_provider_status_summary(db)
 
     return {
         "status": "ok",
@@ -201,6 +205,7 @@ def health(db: Session = Depends(get_db)):
             "latency_ms": llm_status["latency_ms"],
             "checked_at": llm_status["checked_at"],
         },
+        "provider_status": provider_status_summary,
         "llm_usage_today": {
             "total_tokens": usage_today["total_tokens"],
             "cost": usage_today["cost"],

@@ -1,8 +1,8 @@
 {
-  "version": "0.7.2",
-  "url": "https://gitee.com/oldhenpussy/SciPlat/releases/download/v0.7.2/SciPlatSetup-0.7.2.exe",
-  "sha256": "0bd360186e5ee304166adc94834491cf811a041ec932eae78b1dd738d3289606",
-  "notes": "# SciPlat v0.7.2\n\n## 修复：v0.7.1 桌面版启动崩溃\n- 修复 _bundle_main 缺少 Path 导入导致的启动即崩溃（NameError）\n- 已本地启动验证通过（health 200）\n\n## v0.7.1 包含（本次一并以 0.7.2 交付）\n- 更新安装流程修复：安装包下载到 Windows 默认下载文件夹、直启安装器、失败不退出\n- API 服务状态监控：在线状态 + 可用性百分比（最近 30 次探测）+ 状态栏状态点\n\n> 安装过 0.7.1（启动崩溃版）的用户请手动下载 0.7.2 覆盖安装",
+  "version": "0.7.3",
+  "url": "https://gitee.com/oldhenpussy/SciPlat/releases/download/v0.7.3/SciPlatSetup-0.7.3.exe",
+  "sha256": "5fb80735907d5635186e44df0947022f6072635ae509f3fa89eafe097642f23f",
+  "notes": "# SciPlat v0.7.3\n\n## ✨ 新增：AI 状态页（侧边栏二级菜单）\n- 侧边栏新增「AI」分组 →「AI 状态」二级菜单（服务状态 / 模型设置 / 用量与余额）\n- 所有 AI 设置整合进页面：Provider 配置、模型参数、任务路由、用量与余额\n- 顶栏 ⚙️ 与状态栏入口统一跳转到该页面\n\n## 📊 Provider 性能状态监控\n- 抓取 status.deepseek.com 等官方状态页（Statuspage/Instatus 双格式兼容）\n- 页面显示：整体状态（🟢正常/🟡性能下降/🔴中断）+ 组件列表 + 未解决事件\n- **API 性能下降时页面顶部 Alert + 底部状态栏红色警示**\n- 状态页地址可自定义（模型设置）；直连失败自动跟随系统代理重试",
   "mandatory": false,
   "published_at": ""
 }

@@ -242,6 +242,22 @@ def llm_test(db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/llm/status")
+def llm_status(db: Session = Depends(get_db)):
+    """API 服务状态（读缓存，零外部请求）：在线状态 / 可用性百分比 / 最近探测统计。"""
+    from ..services import llm as llm_service
+
+    return llm_service.get_llm_status(db)
+
+
+@router.post("/llm/status/refresh")
+def llm_status_refresh(db: Session = Depends(get_db)):
+    """立即探测一次 API 并记录历史统计。"""
+    from ..services import llm as llm_service
+
+    return llm_service.probe_and_record(db)
+
+
 # ================ 文献 AI 解读 + 十问 ================
 @router.post("/references/{rid}/ai-summary")
 def ai_summary(rid: int, db: Session = Depends(get_db)):

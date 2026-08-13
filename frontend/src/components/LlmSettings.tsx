@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Form, Input, Modal, Radio, Space, Typography, message } from 'antd'
-import { ApiOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Form, Input, Modal, Radio, Space, Tag, Typography, message } from 'antd'
+import { ApiOutlined, SyncOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
 
 interface LlmConfig {
@@ -14,6 +14,20 @@ interface LlmConfig {
   output_price_per_m: number
   cache_price_per_m: number
   model_route: Record<string, string>
+}
+
+interface ApiStatus {
+  configured: boolean
+  provider: string
+  model: string
+  online: boolean
+  availability_pct: number | null
+  total_checks: number
+  ok_checks: number
+  latency_ms: number | null
+  endpoint: string
+  checked_at: string
+  history: boolean[]
 }
 
 // 任务→模型 路由（按任务选模型，实现成本优化）
@@ -33,6 +47,8 @@ export default function LlmSettings({ open, onClose }: { open: boolean; onClose:
   const [form] = Form.useForm()
   const [config, setConfig] = useState<LlmConfig | null>(null)
   const [testing, setTesting] = useState(false)
+  const [status, setStatus] = useState<ApiStatus | null>(null)
+  const [probing, setProbing] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -40,7 +56,23 @@ export default function LlmSettings({ open, onClose }: { open: boolean; onClose:
       setConfig(r.data)
       form.setFieldsValue(r.data)
     }).catch(() => {})
+    api.get<ApiStatus>('/llm/status').then((r) => setStatus(r.data)).catch(() => {})
   }, [open, form])
+
+  const probe = () => {
+    setProbing(true)
+    api.post<ApiStatus>('/llm/status/refresh', {}, { timeout: 20000 })
+      .then((r) => {
+        setStatus(r.data)
+        if (r.data.configured) {
+          r.data.online
+            ? message.success(`API 在线（${r.data.latency_ms ?? '-'}ms），可用性 ${r.data.availability_pct ?? '-'}%`)
+            : message.warning('API 探测失败（离线或地址/Key 错误）')
+        }
+      })
+      .catch((e) => message.error(e.response?.data?.detail ?? '探测失败'))
+      .finally(() => setProbing(false))
+  }
 
   const save = () => {
     form.validateFields().then((v) => {
@@ -114,6 +146,36 @@ export default function LlmSettings({ open, onClose }: { open: boolean; onClose:
         {config && config.api_key && provider === 'openai' && (
           <Alert type="info" showIcon message="已保存 API Key，可重新输入覆盖。" style={{ marginTop: 4 }} />
         )}
+        <Card
+          size="small"
+          title="API 服务状态"
+          style={{ marginBottom: 16 }}
+          extra={<Button size="small" icon={<SyncOutlined />} loading={probing} onClick={probe}>立即探测</Button>}
+        >
+          {!status?.configured ? (
+            <Typography.Text type="secondary">
+              未配置 LLM API（或配置不完整），保存配置后可探测服务状态。
+            </Typography.Text>
+          ) : status.total_checks === 0 ? (
+            <Typography.Text type="secondary">
+              尚未探测。点击「立即探测」检查 {status.provider === 'ollama' ? 'Ollama' : 'API'} 服务可用性。
+            </Typography.Text>
+          ) : (
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Space size={8}>
+                <span style={{ fontSize: 18, lineHeight: 1 }}>{status.online ? '🟢' : '🔴'}</span>
+                <Typography.Text strong>{status.online ? '在线' : '离线'}</Typography.Text>
+                <Tag color="blue">
+                  可用性 {status.availability_pct ?? '-'}%（{status.ok_checks}/{status.total_checks} 次）
+                </Tag>
+                {status.latency_ms != null && <Tag>{status.latency_ms}ms</Tag>}
+              </Space>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                模型：{status.model || '—'} · 探测端点：{status.endpoint || '—'} · 最近探测：{status.checked_at || '—'}
+              </Typography.Text>
+            </Space>
+          )}
+        </Card>
         <Form.Item label="模型参数（状态栏用量/费用估算用，可留空用预设）">
           <Space.Compact style={{ width: '100%' }}>
             <Form.Item name="context_window" noStyle>

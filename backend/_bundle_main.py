@@ -84,21 +84,30 @@ def _wait_ready(timeout: float = 30.0) -> bool:
 _WINDOW = None
 
 
+def _downloads_dir() -> Path:
+    """Windows 默认下载文件夹（见 services/desktop_update，供 download 复用）。"""
+    from app.services import desktop_update
+
+    return desktop_update.downloads_dir()
+
+
 class UpdateApi:
-    """pywebview js_api：前端一键升级能力（下载安装包 → SHA256 校验 → 静默安装）。"""
+    """pywebview js_api：前端一键升级能力（下载安装包到下载文件夹 → SHA256 校验 → 静默安装）。"""
 
     def download(self, url: str, sha256: str) -> dict:
-        """流式下载安装包到临时目录并校验 SHA256（进度经 window 回调前端）。"""
+        """流式下载安装包到 Windows 默认下载文件夹并校验 SHA256（进度经 window 回调前端）。
+
+        文件名取自 URL 资产名（如 SciPlatSetup-0.7.0.exe）；下载完成后保留文件，用户可见可留底。
+        """
         import hashlib
-        import tempfile
-        from pathlib import Path
 
         import httpx
 
         try:
-            d = Path(tempfile.gettempdir()) / "sciplat-update"
+            d = _downloads_dir()
             d.mkdir(parents=True, exist_ok=True)
-            target = d / f"SciPlatSetup-{int(time.time())}.exe"
+            name = Path(url).name or f"SciPlatSetup-{int(time.time())}.exe"
+            target = d / name
             h = hashlib.sha256()
             with httpx.stream("GET", url, timeout=300, follow_redirects=True) as resp:
                 resp.raise_for_status()
@@ -120,35 +129,20 @@ class UpdateApi:
             return {"ok": False, "error": f"下载失败：{e}"}
 
     def install(self, path: str) -> dict:
-        """启动静默安装器并立即退出当前应用。
+        """启动静默安装器并立即退出当前应用；启动失败时返回错误（应用不退出，前端可提示）。
 
-        用 PowerShell 隐藏窗口延迟 5 秒：等待当前进程与 WebView2 子进程完全退出、
-        释放 SciPlat.exe 文件占用（PyInstaller onefile 运行时锁定 exe），
-        再启动安装器覆盖升级（同 AppId，保留 data/）。安装日志写入临时目录便于排查。
+        Inno Setup [Setup] CloseApplications=yes 会自行关闭占用 SciPlat.exe 的进程；
+        再延迟 5 秒退出兜底释放 PyInstaller onefile 文件锁。安装日志写入下载目录。
         """
-        import subprocess
-        import tempfile
-        from pathlib import Path
+        from app.services import desktop_update
 
-        log = Path(tempfile.gettempdir()) / "sciplat-update" / "install.log"
-        log.parent.mkdir(parents=True, exist_ok=True)
-        # 单引号包裹路径（临时目录路径不含单引号）
-        ps = (
-            f"Start-Sleep -Seconds 5; "
-            f"Start-Process -FilePath '{path}' "
-            f"-ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/LOG={log}'"
-        )
-        try:
-            subprocess.Popen(
-                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                close_fds=True,
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        # 立即退出：释放 PyInstaller onefile 对 exe 的占用，让安装器可以覆盖文件
+        result = desktop_update.start_install(path)
+        if not result["ok"]:
+            return result
+        # 等待 onefile 文件锁释放后退出；Inno Setup 安装完成后自动拉起新版本（[Run] nowait）
+        time.sleep(5)
         os._exit(0)
-        return {"ok": True}
+        return {"ok": True}  # 不可达（os._exit），仅类型兜底
 
     def _progress(self, pct: int) -> None:
         global _WINDOW

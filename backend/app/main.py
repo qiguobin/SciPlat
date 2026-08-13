@@ -137,6 +137,30 @@ def _migrate_api_key_encryption() -> None:
         pass
 
 
+def _llm_health_loop() -> None:
+    """后台线程：启动时探测一次 LLM API，之后每 30 分钟一次（写历史统计，失败静默）。"""
+    import time as _time
+
+    from .database import SessionLocal
+
+    first = True
+    while True:
+        if first:
+            first = False
+        else:
+            _time.sleep(30 * 60)
+        try:
+            db = SessionLocal()
+            try:
+                from .services import llm as llm_service
+
+                llm_service.probe_and_record(db)
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
@@ -155,6 +179,8 @@ async def lifespan(_app: FastAPI):
         pass
     # 启动科研追踪后台线程
     threading.Thread(target=_tracker_loop, daemon=True).start()
+    # 启动 LLM API 健康探测线程（立即探测一次 + 每 30 分钟）
+    threading.Thread(target=_llm_health_loop, daemon=True).start()
     yield
 
 

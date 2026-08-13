@@ -19,6 +19,7 @@ interface Health {
   llm_model: string
   llm_context_window: number
   llm_balance: { is_available: boolean; total_balance: number; currency: string; note?: string; manual?: boolean } | null
+  llm_status: { online: boolean; availability_pct: number | null; latency_ms: number | null; checked_at: string } | null
   llm_usage_today: { total_tokens: number; cost: number; calls: number }
   ai_tasks_running: number
   python: string
@@ -134,14 +135,22 @@ export default function StatusBar({ onOpenData, onOpenLlm, onOpenUpdate, onOpenU
           </Tooltip>
 
           <Tooltip title={health?.llm_configured
-            ? 'LLM 用量/余额/上下文（点击查看详情；配置见顶栏 ⚙️）'
+            ? `LLM 用量/余额/上下文（点击查看详情；配置见顶栏 ⚙️）${health.llm_status?.checked_at
+              ? `\nAPI ${health.llm_status.online ? '在线' : '离线'} · 可用性 ${health.llm_status.availability_pct ?? '-'}% · ${health.llm_status.latency_ms ?? '-'}ms · ${health.llm_status.checked_at}`
+              : '\n尚未探测 API 状态（可在 AI 设置中立即探测）'}`
             : '未配置 LLM，点击打开 AI 设置'}>
             <span className="statusbar-item statusbar-click" onClick={health?.llm_configured ? onOpenUsage : onOpenLlm}>
               <RobotOutlined />
               {health?.llm_configured ? (
                 <>
                   <span className="statusbar-llm">
+                    {health.llm_status?.online
+                      ? '🟢 '
+                      : health.llm_status?.checked_at ? '🔴 ' : '⚪ '}
                     🤖 {health.llm_model || health.llm_provider}
+                    {health.llm_status?.checked_at && health.llm_status.availability_pct != null && (
+                      <span className="statusbar-dim"> 可用性 {health.llm_status.availability_pct}%</span>
+                    )}
                     {health.llm_context_window > 0 && <span className="statusbar-dim">（{Math.round(health.llm_context_window / 1024)}K）</span>}
                   </span>
                   <span className="statusbar-dim">

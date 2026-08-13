@@ -374,3 +374,136 @@ def get_usage_summary(db) -> dict:
         "by_model": sorted(by_model.values(), key=lambda m: -m["total_tokens"]),
         "trend": trend,
     }
+
+
+# ---------- API 服务状态探测（零 token 消耗：GET /models 或 Ollama /api/tags） ----------
+
+HEALTH_HISTORY_LEN = 30   # 可用性滑动窗口（最近 N 次探测）
+HEALTH_KEY = "llm_health_stats"
+
+
+def _health_stats(db) -> dict:
+    """读缓存探测统计（settings 键存 JSON，与余额缓存同模式）。"""
+    import json
+
+    from .. import models
+
+    s = db.query(models.Setting).filter_by(key=HEALTH_KEY).first()
+    if not s or not s.value:
+        return {"total": 0, "ok": 0, "last_ok": False, "latency_ms": None,
+                "endpoint": "", "checked_at": "", "history": []}
+    try:
+        data = json.loads(s.value)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+    return {"total": 0, "ok": 0, "last_ok": False, "latency_ms": None,
+            "endpoint": "", "checked_at": "", "history": []}
+
+
+def _record_health(db, ok: bool, latency_ms, endpoint: str) -> dict:
+    """记录一次探测结果并保存统计（history 保留最近 30 次）。"""
+    import json
+    from datetime import datetime
+
+    from .. import models
+
+    stats = _health_stats(db)
+    history = list(stats.get("history") or [])
+    history.append(bool(ok))
+    del history[:-HEALTH_HISTORY_LEN]
+    stats.update({
+        "total": int(stats.get("total") or 0) + 1,
+        "ok": int(stats.get("ok") or 0) + (1 if ok else 0),
+        "last_ok": bool(ok),
+        "latency_ms": latency_ms,
+        "endpoint": endpoint,
+        "checked_at": datetime.now().isoformat(timespec="seconds"),
+        "history": history,
+    })
+    s = db.query(models.Setting).filter_by(key=HEALTH_KEY).first()
+    if s:
+        s.value = json.dumps(stats, ensure_ascii=False)
+    else:
+        db.add(models.Setting(key=HEALTH_KEY, value=json.dumps(stats, ensure_ascii=False)))
+    db.commit()
+    return stats
+
+
+def probe_api_status(db) -> dict:
+    """轻量探测当前配置的 LLM API（OpenAI 兼容 /models、Ollama /api/tags）。
+
+    返回 {ok, latency_ms, endpoint, error}；未配置返回 {configured: False}。
+    base_url 存储格式不统一（裸域名/带 /v1/完整 /chat/completions），候选端点逐个试。
+    """
+    import time as _time
+
+    import httpx
+
+    cfg = _get_cfg(db)
+    if not is_configured(db):
+        return {"configured": False}
+    headers = {"Authorization": f"Bearer {cfg['api_key']}"} if cfg.get("api_key") else {}
+    start = _time.monotonic()
+    try:
+        if cfg["provider"] == "ollama":
+            url = f"{cfg['ollama_url'].rstrip('/')}/api/tags"
+            resp = httpx.get(url, timeout=8.0)
+            resp.raise_for_status()
+        else:
+            base = cfg["base_url"].rstrip("/").replace("/chat/completions", "")
+            candidates: list[str] = []
+            for u in (base + "/models", base + "/v1/models"):
+                if u not in candidates:
+                    candidates.append(u)
+            resp = None
+            last_err = "连接失败"
+            for url in candidates:
+                try:
+                    r = httpx.get(url, headers=headers, timeout=8.0)
+                    if r.status_code < 400:
+                        resp = r
+                        break
+                    last_err = f"HTTP {r.status_code}"
+                except Exception as e:  # noqa: BLE001
+                    last_err = str(e)[:120]
+            if resp is None:
+                raise RuntimeError(last_err)
+        latency = int((_time.monotonic() - start) * 1000)
+        return {"ok": True, "latency_ms": latency, "endpoint": url}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "latency_ms": int((_time.monotonic() - start) * 1000),
+                "endpoint": "", "error": str(e)[:200]}
+
+
+def probe_and_record(db) -> dict:
+    """探测一次并写入历史统计，返回合并状态（供端点 / 后台线程 / 手动刷新复用）。"""
+    result = probe_api_status(db)
+    if not result.get("configured", True):
+        return {"configured": False, "stats": _health_stats(db)}
+    result.pop("configured", None)
+    stats = _record_health(db, result["ok"], result.get("latency_ms"), result.get("endpoint", ""))
+    return {"configured": True, **result, "stats": stats}
+
+
+def get_llm_status(db) -> dict:
+    """读缓存的服务状态（零外部请求）：在线状态 / 可用性百分比 / 最近探测统计。"""
+    cfg = _get_cfg(db)
+    stats = _health_stats(db)
+    total = int(stats.get("total") or 0)
+    ok = int(stats.get("ok") or 0)
+    availability = round(ok * 100 / total) if total else None
+    return {
+        "configured": is_configured(db),
+        "provider": cfg["provider"],
+        "model": cfg["model"],
+        "online": bool(stats.get("last_ok")),
+        "availability_pct": availability,
+        "total_checks": total,
+        "ok_checks": ok,
+        "latency_ms": stats.get("latency_ms"),
+        "endpoint": stats.get("endpoint", ""),
+        "checked_at": stats.get("checked_at", ""),
+        "history": list(stats.get("history") or []),
+    }

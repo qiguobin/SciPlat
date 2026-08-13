@@ -21,6 +21,8 @@ WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=..\desktop\build\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+; 升级时自行关闭运行中的 SciPlat.exe（消除静默安装时文件锁导致的安装中止）
+CloseApplications=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："; Flags: unchecked

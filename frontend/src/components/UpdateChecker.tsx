@@ -74,9 +74,17 @@ export default function UpdateChecker({ open, onClose }: { open: boolean; onClos
           setError(res.error ?? '下载失败')
           return
         }
+        message.success(`安装包已下载到：${res.path}，即将开始安装`)
         setPhase('installing')
-        // 主进程将启动静默安装器并退出当前应用，随后自动拉起新版
+        // 主进程将启动静默安装器并退出当前应用；启动失败时会返回错误（应用不退出）
         py.update.install(res.path)
+          .then((ir: { ok: boolean; error?: string }) => {
+            if (!ir?.ok) {
+              setPhase('error')
+              setError(ir?.error ?? '安装器启动失败，请到下载文件夹手动运行安装包')
+            }
+          })
+          .catch((e: unknown) => { setPhase('error'); setError(String(e)) })
         setPhase('installing')
       })
       .catch((e: unknown) => { setPhase('error'); setError(String(e)) })

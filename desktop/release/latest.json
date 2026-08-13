@@ -1,8 +1,8 @@
 {
-  "version": "0.7.1",
-  "url": "https://gitee.com/oldhenpussy/SciPlat/releases/download/v0.7.1/SciPlatSetup-0.7.1.exe",
-  "sha256": "8dd312820fac14acc36199db6343cd142c8f932eca67eaa849a3853facca385e",
-  "notes": "# SciPlat v0.7.1\n\n## 🔧 修复：更新安装流程\n- 安装包**下载到 Windows 默认下载文件夹**（不再藏在临时目录，下载完成可见）\n- 直启安装器（去掉 PowerShell 中间层，避免转义/安全软件拦截）\n- 安装器启动失败时**应用不再退出**，前端明确提示错误\n- Inno Setup 加固：升级时自动关闭占用进程，消除静默安装中止\n\n## ✨ 新增：API 服务状态监控\n- ⚙️ AI 设置新增「API 服务状态」卡片：🟢 在线/🔴 离线 + **可用性百分比**（最近 30 次探测）+ 延迟 + 「立即探测」\n- 启动时自动探测 + 每 30 分钟一次（零 token 消耗，仅查 /models 或 Ollama /api/tags）\n- 底部状态栏 LLM 旁显示状态点与可用性",
+  "version": "0.7.2",
+  "url": "https://gitee.com/oldhenpussy/SciPlat/releases/download/v0.7.2/SciPlatSetup-0.7.2.exe",
+  "sha256": "0bd360186e5ee304166adc94834491cf811a041ec932eae78b1dd738d3289606",
+  "notes": "# SciPlat v0.7.2\n\n## 🐛 修复：v0.7.1 桌面版启动崩溃\n- 修复  缺少  导入导致的启动即崩溃（NameError）\n- 已本地启动验证通过\n\n## v0.7.1 包含（本次一并以 0.7.2 交付）\n- 🔧 更新安装流程修复：安装包下载到 Windows 默认下载文件夹、直启安装器、失败不退出\n- ✨ API 服务状态监控：在线状态 + 可用性百分比（最近 30 次探测）+ 状态栏状态点\n\n> 安装过 0.7.1（启动崩溃版）的用户请**手动下载 0.7.2 覆盖安装**",
   "mandatory": false,
   "published_at": ""
 }

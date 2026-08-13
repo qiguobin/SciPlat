@@ -2,7 +2,7 @@
   "version": "0.7.2",
   "url": "https://gitee.com/oldhenpussy/SciPlat/releases/download/v0.7.2/SciPlatSetup-0.7.2.exe",
   "sha256": "0bd360186e5ee304166adc94834491cf811a041ec932eae78b1dd738d3289606",
-  "notes": "# SciPlat v0.7.2\n\n## 🐛 修复：v0.7.1 桌面版启动崩溃\n- 修复  缺少  导入导致的启动即崩溃（NameError）\n- 已本地启动验证通过\n\n## v0.7.1 包含（本次一并以 0.7.2 交付）\n- 🔧 更新安装流程修复：安装包下载到 Windows 默认下载文件夹、直启安装器、失败不退出\n- ✨ API 服务状态监控：在线状态 + 可用性百分比（最近 30 次探测）+ 状态栏状态点\n\n> 安装过 0.7.1（启动崩溃版）的用户请**手动下载 0.7.2 覆盖安装**",
+  "notes": "# SciPlat v0.7.2\n\n## 修复：v0.7.1 桌面版启动崩溃\n- 修复 _bundle_main 缺少 Path 导入导致的启动即崩溃（NameError）\n- 已本地启动验证通过（health 200）\n\n## v0.7.1 包含（本次一并以 0.7.2 交付）\n- 更新安装流程修复：安装包下载到 Windows 默认下载文件夹、直启安装器、失败不退出\n- API 服务状态监控：在线状态 + 可用性百分比（最近 30 次探测）+ 状态栏状态点\n\n> 安装过 0.7.1（启动崩溃版）的用户请手动下载 0.7.2 覆盖安装",
   "mandatory": false,
   "published_at": ""
 }

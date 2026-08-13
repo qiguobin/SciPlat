@@ -1,8 +1,8 @@
 {
-  "version": "0.7.0",
-  "url": "https://gitee.com/oldhenpussy/SciPlat/releases/download/v0.7.0/SciPlatSetup-0.7.0.exe",
-  "sha256": "30c10a7b6290df7ff3dd19cf20659e3891705ba75899af03b778e1e2a5508759",
-  "notes": "# SciPlat v0.7.0\n\n## ✨ AI 关联图谱深度解析\n- LLM 现在基于每篇文献的**摘要 + 全文内容**深度评分关联强度（方法/结论/理论/引用依赖），不再只是标签与领域对比\n- 评分前自动提取 PDF 全文，保证 LLM 有内容可分析\n- 未配置 LLM / 评分失败时**明确提示降级**，不再静默伪装成 AI 关联\n\n## 🗂️ 多工作区\n- 独立数据目录：文献库、PDF 附件、笔记、设置按课题完全隔离\n- 顶栏「工作区」：创建/切换/注销，切换后自动刷新\n- 旧数据自动成为「默认」工作区，升级无感\n\n## 📚 文献匹配多来源\n- 新增 PubMed（E-utilities）来源：DOI 自动回退 + 标题检索\n- 新增 OpenAlex 中文文献匹配（中文期刊收录充分）\n- 编辑弹窗「从标题匹配」：多来源候选选择回填\n\n## 🔧 其他\n- 文献列表勾选列宽度压缩（~32px）",
+  "version": "0.7.1",
+  "url": "https://gitee.com/oldhenpussy/SciPlat/releases/download/v0.7.1/SciPlatSetup-0.7.1.exe",
+  "sha256": "8dd312820fac14acc36199db6343cd142c8f932eca67eaa849a3853facca385e",
+  "notes": "# SciPlat v0.7.1\n\n## 🔧 修复：更新安装流程\n- 安装包**下载到 Windows 默认下载文件夹**（不再藏在临时目录，下载完成可见）\n- 直启安装器（去掉 PowerShell 中间层，避免转义/安全软件拦截）\n- 安装器启动失败时**应用不再退出**，前端明确提示错误\n- Inno Setup 加固：升级时自动关闭占用进程，消除静默安装中止\n\n## ✨ 新增：API 服务状态监控\n- ⚙️ AI 设置新增「API 服务状态」卡片：🟢 在线/🔴 离线 + **可用性百分比**（最近 30 次探测）+ 延迟 + 「立即探测」\n- 启动时自动探测 + 每 30 分钟一次（零 token 消耗，仅查 /models 或 Ollama /api/tags）\n- 底部状态栏 LLM 旁显示状态点与可用性",
   "mandatory": false,
   "published_at": ""
 }
